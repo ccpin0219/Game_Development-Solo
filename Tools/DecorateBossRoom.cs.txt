@@ -1,0 +1,161 @@
+// Run as an edit-mode method body through Unity MCP execute_code.
+// Visual-only architecture: preserves arena colliders, tile colors and gameplay objects.
+if (EditorApplication.isPlaying) return "Exit Play Mode before decorating.";
+const string rootName = "Sanctum Architecture";
+if (GameObject.Find(rootName) != null) return "Architecture already exists; refusing to duplicate.";
+if (!AssetDatabase.IsValidFolder("Assets/Dungeon/Sanctum")) AssetDatabase.CreateFolder("Assets/Dungeon", "Sanctum");
+var root = new GameObject(rootName);
+Undo.RegisterCreatedObjectUndo(root, "Decorate boss arena");
+var shader = AssetDatabase.LoadAssetAtPath<Material>("Assets/Dungeon/Materials/Plain Dungeon Stone.mat").shader;
+System.Func<string, Color, float, Material> material = (name, color, metallic) => {
+    string path = "Assets/Dungeon/Sanctum/" + name + ".mat";
+    var m = AssetDatabase.LoadAssetAtPath<Material>(path);
+    if (m == null) { m = new Material(shader); m.name = name; AssetDatabase.CreateAsset(m, path); }
+    m.SetColor("_BaseColor", color); m.SetFloat("_Metallic", metallic); m.SetFloat("_Smoothness", .24f);
+    return m;
+};
+var stone = material("Blue Grey Limestone", new Color(.29f,.34f,.39f), .05f);
+var edge = material("Pale Carved Edges", new Color(.43f,.47f,.48f), .05f);
+var dark = material("Recessed Basalt", new Color(.085f,.115f,.145f), .05f);
+var bronze = material("Antique Brass Inlay", new Color(.48f,.31f,.13f), .65f);
+var teal = material("Sanctum Teal", new Color(.055f,.22f,.25f), .15f);
+var glow = material("Quiet Azure Runes", new Color(.15f,.52f,.6f), .1f);
+glow.EnableKeyword("_EMISSION"); glow.SetColor("_EmissionColor", new Color(.12f,.5f,.65f)*1.1f);
+var grout = material("Floor Mortar", new Color(.065f,.08f,.095f), 0f);
+var cube = Resources.GetBuiltinResource<Mesh>("Cube.fbx");
+System.Func<string, Transform> group = name => { var g=new GameObject(name); g.transform.SetParent(root.transform,false); return g.transform; };
+var walls=group("01 Wall Architecture"); var vault=group("02 Vault Ribs");
+var seal=group("03 Guardian Seal"); var floor=group("04 Floor Inlay"); var accents=group("05 Azure Lanterns");
+System.Func<string, Transform, Vector3, Vector3, Material, GameObject> box = (name,parent,p,s,m) => {
+    var g=new GameObject(name); g.transform.SetParent(parent,false); g.transform.position=p; g.transform.localScale=s;
+    g.AddComponent<MeshFilter>().sharedMesh=cube; g.AddComponent<MeshRenderer>().sharedMaterial=m;
+    g.isStatic=true; return g;
+};
+System.Action<string,Transform,Vector3,Vector3,float,Material> bar = (name,parent,a,b,w,m) => {
+    var g=box(name,parent,(a+b)*.5f,new Vector3(w,(b-a).magnitude,w),m);
+    g.transform.rotation=Quaternion.FromToRotation(Vector3.up,b-a);
+};
+// Repeated shallow pilasters stay at the walls, leaving the combat field open.
+foreach(float side in new[]{-1f,1f}) {
+    float x=side*35.65f;
+    foreach(float z in new[]{-48f,-32f,-16f,0f,16f,32f,48f}) {
+        box("Pier",walls,new Vector3(x,12,z),new Vector3(.65f,24,1.7f),stone);
+        box("Pier Foot",walls,new Vector3(x,1.2f,z),new Vector3(.95f,2.4f,2.5f),edge);
+        box("Pier Capital",walls,new Vector3(x,22.7f,z),new Vector3(1.1f,1.1f,2.8f),edge);
+        box("Pier Inset",walls,new Vector3(side*35.27f,12,z),new Vector3(.09f,15,.68f),dark);
+        box("Pier Brass",walls,new Vector3(side*35.2f,18.6f,z),new Vector3(.08f,.13f,1.25f),bronze);
+    }
+    box("Lower String Course",walls,new Vector3(side*35.75f,5.8f,0),new Vector3(.35f,.32f,108),edge);
+    box("Upper Cornice",walls,new Vector3(side*35.6f,24.6f,0),new Vector3(.7f,.65f,108),edge);
+    // Large ashlar courses give the empty walls a human-readable scale.
+    for(int row=0;row<8;row++) {
+        float y=2.8f+row*3f;
+        box("Horizontal Masonry Joint",walls,new Vector3(side*35.97f,y,0),new Vector3(.045f,.045f,107.8f),dark);
+        for(int j=0;j<13;j++) {
+            float z=-50+j*8+(row%2)*4;
+            if(z>53)continue;
+            box("Vertical Masonry Joint",walls,new Vector3(side*35.96f,y+1.5f,z),new Vector3(.05f,2.96f,.045f),dark);
+        }
+    }
+    // Segmented arches above each bay, flat against the wall.
+    for(int bay=0;bay<6;bay++) {
+        float zc=-40+bay*16;
+        for(int i=0;i<12;i++) {
+            float a=i*Mathf.PI/12, b=(i+1)*Mathf.PI/12;
+            Vector3 p=new Vector3(side*35.24f,16.2f+Mathf.Sin(a)*6.1f,zc+Mathf.Cos(a)*7.4f);
+            Vector3 q=new Vector3(side*35.24f,16.2f+Mathf.Sin(b)*6.1f,zc+Mathf.Cos(b)*7.4f);
+            bar("Bay Arch",walls,p,q,.38f,edge);
+        }
+    }
+}
+// Ceiling coffers and shallow vault ribs remain above the boss's jump envelope.
+foreach(float z in new[]{-48f,-24f,0f,24f,48f}) {
+    for(int i=0;i<16;i++) {
+        float xa=-35.5f+i*71/16, xb=-35.5f+(i+1)*71/16;
+        float ya=23.5f+3.6f*Mathf.Sin((xa+35.5f)/71*Mathf.PI);
+        float yb=23.5f+3.6f*Mathf.Sin((xb+35.5f)/71*Mathf.PI);
+        bar("Vault Rib",vault,new Vector3(xa,ya,z),new Vector3(xb,yb,z),.7f,stone);
+    }
+    box("Vault Keystone",vault,new Vector3(0,26.9f,z),new Vector3(1.5f,.5f,1.5f),bronze);
+}
+foreach(float x in new[]{-24f,-12f,0f,12f,24f})
+    box("Ceiling Longitudinal Rib",vault,new Vector3(x,27.65f,0),new Vector3(.36f,.5f,108),dark);
+// Monumental sealed doorway on the wall behind the guardian.
+box("Seal Recess",seal,new Vector3(0,11.5f,53.82f),new Vector3(22,23,.22f),dark);
+box("Sealed Door Left",seal,new Vector3(-4.5f,8.2f,53.61f),new Vector3(8.7f,16.4f,.18f),teal);
+box("Sealed Door Right",seal,new Vector3(4.5f,8.2f,53.61f),new Vector3(8.7f,16.4f,.18f),teal);
+foreach(float x in new[]{-10.7f,10.7f}) {
+    box("Portal Jamb",seal,new Vector3(x,11.7f,53.28f),new Vector3(1.3f,23.4f,.9f),edge);
+    box("Portal Gold Fillet",seal,new Vector3(x,11.7f,52.78f),new Vector3(.13f,21,.08f),bronze);
+}
+box("Portal Lintel",seal,new Vector3(0,23,53.28f),new Vector3(23.5f,1.2f,.9f),edge);
+box("Door Center Inlay",seal,new Vector3(0,8.1f,53.43f),new Vector3(.1f,16.2f,.08f),bronze);
+for(int n=0;n<2;n++) {
+    float radius=n==0?6.2f:5.5f;
+    for(int i=0;i<48;i++) {
+        float a=i*Mathf.PI*2/48,b=(i+1)*Mathf.PI*2/48;
+        bar("Great Seal Ring",seal,new Vector3(Mathf.Cos(a)*radius,14+Mathf.Sin(a)*radius,53.13f),new Vector3(Mathf.Cos(b)*radius,14+Mathf.Sin(b)*radius,53.13f),n==0?.2f:.08f,bronze);
+    }
+}
+for(int i=0;i<12;i++) {
+    float a=i*Mathf.PI*2/12;
+    var glyph=box("Seal Radial Glyph",seal,new Vector3(Mathf.Cos(a)*5.85f,14+Mathf.Sin(a)*5.85f,53.03f),new Vector3(.13f,.4f,.08f),glow);
+    glyph.transform.rotation=Quaternion.Euler(0,0,a*Mathf.Rad2Deg-90);
+}
+var diamond=box("Guardian Sigil",seal,new Vector3(0,14,53.02f),new Vector3(2.6f,2.6f,.15f),bronze);
+diamond.transform.rotation=Quaternion.Euler(0,0,45);
+var inset=box("Guardian Sigil Core",seal,new Vector3(0,14,52.91f),new Vector3(1.85f,1.85f,.1f),dark);
+inset.transform.rotation=Quaternion.Euler(0,0,45);
+bar("Sigil Light",seal,new Vector3(0,12.9f,52.8f),new Vector3(0,15.1f,52.8f),.12f,glow);
+foreach(float x in new[]{-25f,-17f,17f,25f}) {
+    box("End Wall Relief",seal,new Vector3(x,11.5f,53.7f),new Vector3(1.4f,23,.5f),stone);
+    box("End Wall Relief Cap",seal,new Vector3(x,22.9f,53.5f),new Vector3(2.2f,.65f,.7f),edge);
+}
+// Thin joints follow the existing six-metre tiles without covering their warning colors.
+for(int x=-30;x<=30;x+=6)box("Tile Joint",floor,new Vector3(x,.008f,0),new Vector3(.035f,.008f,107.8f),grout);
+for(int z=-48;z<=48;z+=6)box("Tile Joint",floor,new Vector3(0,.008f,z),new Vector3(71.8f,.008f,.035f),grout);
+foreach(float x in new[]{-35.4f,35.4f}) {
+    box("Perimeter Brass Line",floor,new Vector3(x,.014f,0),new Vector3(.08f,.008f,106.8f),bronze);
+    for(int z=-48;z<=48;z+=6) {
+        var d=box("Perimeter Diamond",floor,new Vector3(x,.02f,z),new Vector3(.4f,.01f,.4f),bronze);
+        d.transform.rotation=Quaternion.Euler(0,45,0);
+    }
+}
+foreach(float z in new[]{-53.4f,53.4f})box("Perimeter Brass Line",floor,new Vector3(0,.014f,z),new Vector3(70.8f,.008f,.08f),bronze);
+// Restrained cool lanterns balance the existing warm flames.
+foreach(float x in new[]{-35.05f,35.05f}) foreach(float z in new[]{-40f,-8f,24f}) {
+    box("Lantern Backplate",accents,new Vector3(x,13,z),new Vector3(.3f,2.2f,1.2f),bronze);
+    box("Azure Glass",accents,new Vector3(x-Mathf.Sign(x)*.22f,13,z),new Vector3(.24f,1.55f,.55f),glow);
+    var g=new GameObject("Azure Wall Wash");g.transform.SetParent(accents,false);g.transform.position=new Vector3(x-Mathf.Sign(x)*1.5f,13,z);
+    var l=g.AddComponent<Light>();l.type=LightType.Point;l.color=new Color(.3f,.65f,.85f);l.intensity=9;l.range=13;l.shadows=LightShadows.None;
+}
+// Combine visual geometry per section/material, avoiding hundreds of extra draw calls.
+int combinedCount=0;
+foreach(Transform section in root.transform) {
+    var buckets=new System.Collections.Generic.Dictionary<Material,System.Collections.Generic.List<MeshFilter>>();
+    foreach(var mf in section.GetComponentsInChildren<MeshFilter>()) {
+        var m=mf.GetComponent<MeshRenderer>().sharedMaterial;
+        if(!buckets.ContainsKey(m))buckets[m]=new System.Collections.Generic.List<MeshFilter>();
+        buckets[m].Add(mf);
+    }
+    foreach(var entry in buckets) {
+        var items=new CombineInstance[entry.Value.Count];
+        for(int i=0;i<items.Length;i++){items[i].mesh=entry.Value[i].sharedMesh;items[i].transform=entry.Value[i].transform.localToWorldMatrix;}
+        var mesh=new Mesh();mesh.name=section.name+" "+entry.Key.name;mesh.indexFormat=UnityEngine.Rendering.IndexFormat.UInt32;mesh.CombineMeshes(items,true,true);
+        string path="Assets/Dungeon/Sanctum/Section"+combinedCount+".asset";AssetDatabase.CreateAsset(mesh,path);
+        var g=new GameObject(entry.Key.name);g.transform.SetParent(section,false);g.AddComponent<MeshFilter>().sharedMesh=mesh;
+        var renderer=g.AddComponent<MeshRenderer>();renderer.sharedMaterial=entry.Key;
+        renderer.shadowCastingMode=UnityEngine.Rendering.ShadowCastingMode.Off;
+        g.isStatic=true;combinedCount++;
+        foreach(var mf in entry.Value)UnityEngine.Object.DestroyImmediate(mf.gameObject);
+    }
+}
+GameObject.Find("Sanctum Architecture/04 Floor Inlay/Floor Mortar").transform.position += Vector3.up*.025f;
+foreach(var light in UnityEngine.Object.FindObjectsByType<Light>(FindObjectsSortMode.None)) {
+    if(light.name=="Vault Fill Light") { Undo.RecordObject(light,"Balance sanctum lighting"); light.intensity=55; }
+    if(light.name=="Directional Light") { Undo.RecordObject(light,"Balance sanctum lighting"); light.intensity=.3f; }
+}
+AssetDatabase.SaveAssets();
+UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(root.scene);
+SceneView.RepaintAll();
+return new {root=root.name,meshSections=combinedCount,colliders=root.GetComponentsInChildren<Collider>().Length};

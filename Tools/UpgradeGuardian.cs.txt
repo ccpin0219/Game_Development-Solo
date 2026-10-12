@@ -1,0 +1,198 @@
+// Execute in edit mode. Retains all six damage colliders and existing animation anchors.
+if(EditorApplication.isPlaying)return "Exit Play Mode first.";
+var boss=UnityEngine.Object.FindFirstObjectByType<DungeonBoss>();
+if(boss.GetComponent<DungeonGuardianVisuals>()!=null)return "Guardian already upgraded.";
+const string folder="Assets/Dungeon/Guardian";
+if(!AssetDatabase.IsValidFolder(folder))AssetDatabase.CreateFolder("Assets/Dungeon","Guardian");
+Undo.RegisterFullObjectHierarchyUndo(boss.gameObject,"Upgrade stone guardian");
+var lit=AssetDatabase.LoadAssetAtPath<Material>("Assets/Dungeon/Sanctum/Blue Grey Limestone.mat").shader;
+System.Func<string,Color,float,float,Material> material=(name,color,metal,smooth)=>{
+    var m=new Material(lit);m.name=name;m.SetColor("_BaseColor",color);m.SetFloat("_Metallic",metal);m.SetFloat("_Smoothness",smooth);
+    AssetDatabase.CreateAsset(m,folder+"/"+name+".mat");return m;
+};
+var stone=material("Weathered Ivory Basalt",new Color(.49f,.53f,.55f),.08f,.22f);
+var dark=material("Deep Obsidian Joints",new Color(.085f,.105f,.13f),.35f,.34f);
+var gold=material("Worn Guardian Bronze",new Color(.66f,.43f,.19f),.65f,.38f);
+var edge=material("Carved Silver Stone",new Color(.64f,.66f,.64f),.2f,.28f);
+var rune=material("Molten Guardian Inscriptions",new Color(1,.24f,.035f),.05f,.3f);
+rune.globalIlluminationFlags=MaterialGlobalIlluminationFlags.BakedEmissive;rune.EnableKeyword("_EMISSION");rune.SetColor("_EmissionColor",new Color(1,.12f,.008f)*1.8f);
+var weak=material("Living Weak Point Core",new Color(.95f,.09f,.014f),.2f,.7f);
+weak.globalIlluminationFlags=MaterialGlobalIlluminationFlags.BakedEmissive;weak.EnableKeyword("_EMISSION");weak.SetColor("_EmissionColor",new Color(1,.018f,.003f)*1.5f);
+var broken=material("Extinguished Core",new Color(.14f,.15f,.16f),.3f,.24f);
+// Subtle stone grain, shared by every carved block.
+var grain=new Texture2D(128,128,TextureFormat.RGBA32,true);grain.name="Fine Stone Grain";grain.wrapMode=TextureWrapMode.Repeat;
+var colors=new Color[128*128];for(int y=0;y<128;y++)for(int x=0;x<128;x++){
+    float n=Mathf.PerlinNoise(x*.16f,y*.16f)*.12f+Mathf.PerlinNoise(x*.63f+21,y*.63f)*.07f;
+    float c=.8f+n;colors[y*128+x]=new Color(c,c,c,1);
+}grain.SetPixels(colors);grain.Apply();AssetDatabase.CreateAsset(grain,folder+"/Stone Grain.asset");
+stone.SetTexture("_BaseMap",grain);stone.SetTextureScale("_BaseMap",new Vector2(3,3));edge.SetTexture("_BaseMap",grain);
+// A clipped cube: six octagonal faces, twelve bevels and eight corner facets.
+float bevel=.1f;
+var points=new System.Collections.Generic.List<Vector3>();
+for(int axis=0;axis<3;axis++)foreach(float sx in new[]{-1f,1f})foreach(float sy in new[]{-1f,1f})foreach(float sz in new[]{-1f,1f}){
+    var p=new Vector3(sx*(.5f-bevel),sy*(.5f-bevel),sz*(.5f-bevel));p[axis]=Mathf.Sign(p[axis])*.5f;points.Add(p);
+}
+var normals=new System.Collections.Generic.List<Vector3>();var distances=new System.Collections.Generic.List<float>();
+for(int a=0;a<3;a++)foreach(float s in new[]{-1f,1f}){var n=Vector3.zero;n[a]=s;normals.Add(n);distances.Add(.5f);}
+for(int a=0;a<3;a++)for(int b=a+1;b<3;b++)foreach(float sa in new[]{-1f,1f})foreach(float sb in new[]{-1f,1f}){var n=Vector3.zero;n[a]=sa;n[b]=sb;normals.Add(n);distances.Add(1-bevel);}
+foreach(float sx in new[]{-1f,1f})foreach(float sy in new[]{-1f,1f})foreach(float sz in new[]{-1f,1f}){normals.Add(new Vector3(sx,sy,sz));distances.Add(1.5f-2*bevel);}
+var vertices=new System.Collections.Generic.List<Vector3>();var uv=new System.Collections.Generic.List<Vector2>();var triangles=new System.Collections.Generic.List<int>();
+for(int f=0;f<normals.Count;f++){
+    var face=new System.Collections.Generic.List<Vector3>();foreach(var p in points)if(Mathf.Abs(Vector3.Dot(p,normals[f])-distances[f])<.001f)face.Add(p);
+    if(face.Count<3)continue;var n=normals[f].normalized;Vector3 center=Vector3.zero;foreach(var p in face)center+=p;center/=face.Count;
+    var u=Vector3.Cross(n,Mathf.Abs(n.y)>.9f?Vector3.right:Vector3.up).normalized;var v=Vector3.Cross(n,u);
+    face.Sort((p,q)=>Mathf.Atan2(Vector3.Dot(p-center,v),Vector3.Dot(p-center,u)).CompareTo(Mathf.Atan2(Vector3.Dot(q-center,v),Vector3.Dot(q-center,u))));
+    int start=vertices.Count;foreach(var p in face){vertices.Add(p);uv.Add(new Vector2(Vector3.Dot(p,u)+.5f,Vector3.Dot(p,v)+.5f));}
+    for(int i=1;i<face.Count-1;i++)triangles.AddRange(new[]{start,start+i,start+i+1});
+}
+var block=new Mesh();block.name="Chiselled Bevel Block";block.SetVertices(vertices);block.SetUVs(0,uv);block.SetTriangles(triangles,0);block.RecalculateNormals();block.RecalculateBounds();AssetDatabase.CreateAsset(block,folder+"/Bevel Block.asset");
+// Shared round socket geometry, normal facing front/back along Z.
+var rv=new System.Collections.Generic.List<Vector3>();var rt=new System.Collections.Generic.List<int>();
+for(int i=0;i<48;i++)for(int j=0;j<8;j++){
+    float a=i*Mathf.PI*2/48,b=j*Mathf.PI*2/8;float r=1+.075f*Mathf.Cos(b);
+    rv.Add(new Vector3(Mathf.Cos(a)*r,Mathf.Sin(a)*r,.075f*Mathf.Sin(b)));
+    int k=i*8+j,kn=i*8+(j+1)%8,nn=((i+1)%48)*8+j,nj=((i+1)%48)*8+(j+1)%8;rt.AddRange(new[]{k,nn,kn,kn,nn,nj});
+}
+var ringMesh=new Mesh();ringMesh.name="Forged Socket Ring";ringMesh.SetVertices(rv);ringMesh.SetTriangles(rt,0);ringMesh.RecalculateNormals();ringMesh.RecalculateBounds();AssetDatabase.CreateAsset(ringMesh,folder+"/Socket Ring.asset");
+var primary=new System.Collections.Generic.List<Transform>();
+foreach(var t in boss.GetComponentsInChildren<Transform>())if(t.name.StartsWith("Simple ")||t.name.StartsWith("War Hammer "))primary.Add(t);
+foreach(var renderer in boss.GetComponentsInChildren<MeshRenderer>()){
+    if(renderer.name=="Weak Point")continue;
+    if(!primary.Contains(renderer.transform))renderer.enabled=false;
+    else{renderer.GetComponent<MeshFilter>().sharedMesh=block;renderer.sharedMaterial=renderer.name.Contains("Hammer")?dark:stone;}
+}
+boss.weakPointMaterial=weak;boss.brokenWeakPointMaterial=broken;
+foreach(var p in boss.GetComponentsInChildren<DungeonBossPart>())p.GetComponent<Renderer>().sharedMaterial=weak;
+var groups=new System.Collections.Generic.List<Transform>();
+System.Func<Transform,string,Transform> group=(anchor,name)=>{
+    var g=new GameObject(name);g.transform.SetParent(anchor,true);groups.Add(g.transform);return g.transform;
+};
+System.Func<string,Transform,Vector3,Vector3,Material,GameObject> box=(name,parent,p,s,m)=>{
+    var g=new GameObject(name);g.transform.SetParent(parent,false);g.transform.localPosition=p;g.transform.localScale=s;
+    g.AddComponent<MeshFilter>().sharedMesh=block;g.AddComponent<MeshRenderer>().sharedMaterial=m;return g;
+};
+System.Action<string,Transform,Vector3,Vector3,float,Material> bar=(name,parent,a,b,width,m)=>{
+    var g=box(name,parent,(a+b)*.5f,new Vector3(width,(b-a).magnitude,width),m);g.transform.localRotation=Quaternion.FromToRotation(Vector3.up,b-a);
+};
+System.Action<Transform,Vector3,float,float,Material> ring=(parent,p,rx,ry,m)=>{
+    var g=new GameObject("Forged Core Socket");g.transform.SetParent(parent,false);g.transform.localPosition=p;g.transform.localScale=new Vector3(rx,ry,1);
+    g.AddComponent<MeshFilter>().sharedMesh=ringMesh;g.AddComponent<MeshRenderer>().sharedMaterial=m;
+};
+Transform torso=null,head=null;foreach(var t in primary){if(t.name=="Simple Body")torso=t;if(t.name=="Simple Head")head=t;}
+var chest=group(torso,"Guardian Chest Armour");
+// Armour panels surround the central weak-point cap, leaving its silhouette clear.
+foreach(float sign in new[]{-1f,1f}){
+    var pauldron=box("Pectoral Plate",chest,new Vector3(sign*1.73f,10.95f,-1.48f),new Vector3(2.15f,1.14f,.48f),edge);pauldron.transform.localRotation=Quaternion.Euler(0,0,sign*-12);
+    bar("Pectoral Brass Edge",chest,new Vector3(sign*.65f,11.3f,-1.77f),new Vector3(sign*2.7f,10.8f,-1.77f),.12f,gold);
+    box("Side Breastplate",chest,new Vector3(sign*2.43f,9,-1.48f),new Vector3(.7f,2.4f,.42f),dark);
+    for(int i=0;i<3;i++){
+        box("Rib Plate",chest,new Vector3(sign*1.72f,8.4f-i*.65f,-1.49f),new Vector3(1.95f,.46f,.45f),stone);
+        box("Rib Inlay",chest,new Vector3(sign*2.18f,8.4f-i*.65f,-1.75f),new Vector3(.44f,.055f,.035f),gold);
+    }
+    for(int i=0;i<3;i++)bar("Shoulder Conduit",chest,new Vector3(sign*1.38f,9.3f+i*.28f,-1.68f),new Vector3(sign*2.24f,9.5f+i*.28f,-1.68f),.055f,rune);
+}
+ring(chest,new Vector3(0,9.2f,-1.67f),1.22f,1.22f,gold);
+ring(chest,new Vector3(0,9.2f,-1.69f),1.43f,1.43f,dark);
+for(int i=0;i<12;i++){
+    float a=i*Mathf.PI*2/12;var p=new Vector3(Mathf.Cos(a)*1.42f,9.2f+Mathf.Sin(a)*1.42f,-1.8f);
+    var g=box("Core Rune",chest,p,new Vector3(.08f,.19f,.065f),rune);g.transform.localRotation=Quaternion.Euler(0,0,a*Mathf.Rad2Deg-90);
+}
+box("Waist Girdle",chest,new Vector3(0,6.8f,0),new Vector3(5.5f,.68f,3),dark);
+box("Belt Inlay",chest,new Vector3(0,6.85f,-1.56f),new Vector3(4.6f,.16f,.12f),gold);
+for(int i=-2;i<=2;i++){
+    var g=box("Hanging Armoured Tasset",chest,new Vector3(i*.92f,6.1f,-1.52f),new Vector3(.8f,1.4f,.35f),i%2==0?stone:dark);g.transform.localRotation=Quaternion.Euler(-10,0,-i*5);
+    box("Tasset Rivet",chest,new Vector3(i*.92f,6.5f,-1.76f),new Vector3(.15f,.15f,.08f),gold);
+}
+// Spine and rear plates make circling the boss visually worthwhile.
+for(int i=0;i<5;i++)box("Spine Segment",chest,new Vector3(0,7.4f+i*.83f,1.53f),new Vector3(.72f,.62f,.48f),dark);
+foreach(float sign in new[]{-1f,1f})for(int i=0;i<3;i++)box("Rear Armour",chest,new Vector3(sign*1.75f,8+i*1.35f,1.5f),new Vector3(1.65f,1.1f,.35f),stone);
+// Crowned cyclopean mask frames the existing head weak point.
+var helm=group(head,"Guardian Crowned Helm");
+box("Neck Joint",helm,new Vector3(0,12.05f,0),new Vector3(1.6f,.65f,1.65f),dark);
+box("Helmet Brow",helm,new Vector3(0,14.19f,-1.08f),new Vector3(2.7f,.37f,.45f),gold);
+foreach(float sign in new[]{-1f,1f}){
+    var cheek=box("Angled Cheek Guard",helm,new Vector3(sign*1.09f,13.03f,-1.04f),new Vector3(.42f,1.65f,.55f),edge);cheek.transform.localRotation=Quaternion.Euler(0,0,sign*-12);
+    box("Temple Bronze",helm,new Vector3(sign*1.22f,13.6f,.1f),new Vector3(.25f,1.35f,1.9f),gold);
+    var crest=box("Crown Wing",helm,new Vector3(sign*1.03f,14.82f,.05f),new Vector3(.42f,1.65f,.72f),dark);crest.transform.localRotation=Quaternion.Euler(0,0,sign*-22);
+    bar("Crown Wing Inlay",helm,new Vector3(sign*.78f,14.25f,-.37f),new Vector3(sign*1.25f,15.45f,-.37f),.08f,gold);
+}
+box("Crown Central Crest",helm,new Vector3(0,14.95f,.05f),new Vector3(.44f,1.5f,.58f),gold);
+box("Jaw Guard",helm,new Vector3(0,12.14f,-1.05f),new Vector3(1.85f,.35f,.65f),dark);
+ring(helm,new Vector3(0,13.15f,-1.1f),.86f,.86f,gold);
+ring(helm,new Vector3(0,13.15f,-1.16f),.95f,.95f,dark);
+for(int i=0;i<5;i++)box("Jaw Vent",helm,new Vector3((i-2)*.25f,12.15f,-1.4f),new Vector3(.06f,.17f,.045f),gold);
+// Each arm/leg keeps its own section so attacks animate the armour with its original anchor.
+foreach(var part in primary){
+    if(part.name!="Simple Arm" && part.name!="Simple Leg")continue;
+    bool arm=part.name=="Simple Arm";float x=part.position.x,cy=part.position.y,sign=Mathf.Sign(x);
+    var g=group(part,arm?"Guardian Arm Armour":"Guardian Leg Armour");
+    ring(g,new Vector3(x,cy,-1.23f),arm?.72f:.67f,1.05f,gold);
+    foreach(float side in new[]{-1f,1f}){
+        box("Socket Side Rail",g,new Vector3(x+side*.87f,cy,-1.13f),new Vector3(.18f,2.45f,.2f),dark);
+        box("Rune Trace",g,new Vector3(x+side*.84f,cy,-1.26f),new Vector3(.055f,.85f,.055f),rune);
+    }
+    if(arm){
+        for(int layer=0;layer<3;layer++){
+            var shoulder=box("Layered Pauldron",g,new Vector3(x+sign*(.15f+layer*.22f),11.8f-layer*.42f,.02f),new Vector3(3.15f-layer*.22f,.72f,3.05f-layer*.12f),layer==0?edge:stone);
+            shoulder.transform.localRotation=Quaternion.Euler(0,0,-sign*(13+layer*3));
+            bar("Pauldron Gold Rim",g,new Vector3(x-1.17f,11.95f-layer*.46f,-1.58f),new Vector3(x+1.17f,11.95f-layer*.46f,-1.58f),.1f,gold);
+        }
+        box("Arm Elbow Joint",g,new Vector3(x,9.8f,0),new Vector3(2.04f,.36f,2.1f),dark);
+        box("Arm Wrist Cuff",g,new Vector3(x,6.25f,0),new Vector3(2.2f,.65f,2.25f),gold);
+        box("Stone Fist",g,new Vector3(x,5.45f,-.12f),new Vector3(2.28f,1.05f,2.35f),stone);
+        for(int kn=0;kn<4;kn++)box("Fist Knuckle",g,new Vector3(x-.72f+kn*.48f,5.58f,-1.39f),new Vector3(.4f,.55f,.38f),edge);
+        for(int riv=0;riv<3;riv++)box("Shoulder Rivet",g,new Vector3(x-.75f+riv*.75f,11.9f,-1.65f),new Vector3(.18f,.18f,.12f),gold);
+    }else{
+        box("Knee Housing",g,new Vector3(x,5.32f,-.12f),new Vector3(2.22f,1.05f,2.38f),stone);
+        var knee=box("Diamond Knee Plate",g,new Vector3(x,5.3f,-1.37f),new Vector3(.72f,.72f,.25f),gold);knee.transform.localRotation=Quaternion.Euler(0,0,45);
+        box("Ankle Joint",g,new Vector3(x,1.24f,0),new Vector3(2.02f,.4f,2.1f),dark);
+        box("Heavy Armoured Foot",g,new Vector3(x,.53f,-.35f),new Vector3(2.35f,1.06f,3),dark);
+        box("Toe Cap",g,new Vector3(x,.66f,-1.55f),new Vector3(2.22f,.7f,.74f),edge);
+        for(int toe=0;toe<3;toe++)box("Toe Bronze Detail",g,new Vector3(x-.68f+toe*.68f,.64f,-1.95f),new Vector3(.1f,.48f,.065f),gold);
+    }
+}
+// Monumental two-faced hammer with metal striking plates and a molten seal.
+foreach(var part in primary){
+    if(!part.name.StartsWith("War Hammer "))continue;
+    var g=group(part,"Guardian Forged Hammer");
+    if(part.name=="War Hammer Handle"){
+        for(int i=0;i<11;i++)box("Leather Grip Band",g,new Vector3(4.4f,3+i*.42f,-.7f),new Vector3(.59f,.16f,.59f),i%3==0?gold:dark);
+        box("Hammer Pommel",g,new Vector3(4.4f,8.48f,-.7f),new Vector3(.88f,.65f,.88f),gold);
+    }else{
+        foreach(float z in new[]{-2.92f,1.52f}){
+            box("Hammer Striking Face",g,new Vector3(4.4f,1.6f,z),new Vector3(3.05f,2.88f,.48f),edge);
+            box("Hammer Face Binding",g,new Vector3(4.4f,1.6f,z+(z<0?-.27f:.27f)),new Vector3(2.65f,2.48f,.16f),gold);
+        }
+        box("Hammer Spine",g,new Vector3(4.4f,2.91f,-.7f),new Vector3(.8f,.33f,4.4f),gold);
+        ring(g,new Vector3(4.4f,1.6f,-3.28f),.86f,.86f,dark);
+        ring(g,new Vector3(4.4f,1.6f,-3.39f),.7f,.7f,gold);
+        var emblem=box("Hammer Molten Sigil",g,new Vector3(4.4f,1.6f,-3.49f),new Vector3(.59f,.59f,.08f),rune);emblem.transform.localRotation=Quaternion.Euler(0,0,45);
+        for(int i=0;i<4;i++)bar("Hammer Face Rune",g,new Vector3(3.45f+i*.62f,.6f,-3.2f),new Vector3(3.45f+i*.62f,.9f,-3.2f),.07f,dark);
+    }
+}
+// Shallow asymmetric fractures across the stone plates.
+foreach(var g in groups){
+    if(g.name!="Guardian Chest Armour" && g.name!="Guardian Arm Armour")continue;
+    float x=g.parent.position.x;float y=g.name=="Guardian Chest Armour"?10.9f:11.7f;
+    bar("Stone Fracture",g,new Vector3(x-.9f,y+.22f,-1.72f),new Vector3(x-.55f,y-.02f,-1.72f),.035f,dark);
+    bar("Stone Fracture",g,new Vector3(x-.55f,y-.02f,-1.72f),new Vector3(x-.64f,y-.27f,-1.72f),.035f,dark);
+}
+// Consolidate each animated body section by material, preserving local motion.
+int meshCount=0;var visuals=new System.Collections.Generic.List<DungeonGuardianVisuals.PartVisual>();
+foreach(var section in groups){
+    var buckets=new System.Collections.Generic.Dictionary<Material,System.Collections.Generic.List<MeshFilter>>();
+    foreach(var mf in section.GetComponentsInChildren<MeshFilter>()){
+        var m=mf.GetComponent<MeshRenderer>().sharedMaterial;if(!buckets.ContainsKey(m))buckets[m]=new System.Collections.Generic.List<MeshFilter>();buckets[m].Add(mf);
+    }
+    var runes=new System.Collections.Generic.List<Renderer>();
+    foreach(var bucket in buckets){
+        var combine=new CombineInstance[bucket.Value.Count];for(int i=0;i<combine.Length;i++){combine[i].mesh=bucket.Value[i].sharedMesh;combine[i].transform=section.worldToLocalMatrix*bucket.Value[i].transform.localToWorldMatrix;}
+        var mesh=new Mesh();mesh.name=section.name+" "+bucket.Key.name;mesh.indexFormat=UnityEngine.Rendering.IndexFormat.UInt32;mesh.CombineMeshes(combine,true,true);AssetDatabase.CreateAsset(mesh,folder+"/Armour"+(meshCount++)+".asset");
+        var merged=new GameObject(bucket.Key.name);merged.transform.SetParent(section,false);merged.AddComponent<MeshFilter>().sharedMesh=mesh;var r=merged.AddComponent<MeshRenderer>();r.sharedMaterial=bucket.Key;
+        if(bucket.Key==rune)runes.Add(r);foreach(var mf in bucket.Value)UnityEngine.Object.DestroyImmediate(mf.gameObject);
+    }
+    var weakTransform=section.parent.Find("Weak Point");if(weakTransform!=null)visuals.Add(new DungeonGuardianVisuals.PartVisual{part=weakTransform.GetComponent<DungeonBossPart>(),runes=runes.ToArray()});
+}
+var effect=boss.gameObject.AddComponent<DungeonGuardianVisuals>();effect.parts=visuals.ToArray();effect.fragmentMesh=block;effect.fragmentMaterial=stone;
+AssetDatabase.SaveAssets();UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(boss.gameObject.scene);SceneView.RepaintAll();
+return new{armourMeshes=meshCount,weakPoints=visuals.Count,colliders=boss.GetComponentsInChildren<Collider>().Length};

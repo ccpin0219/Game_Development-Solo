@@ -1,0 +1,105 @@
+// Edit-mode generator. Original emitter transforms and colliders are retained.
+if(EditorApplication.isPlaying)return "Exit play mode first.";
+if(GameObject.Find("Sanctum Fire Braziers")!=null)return "Braziers already decorated.";
+const string folder="Assets/Dungeon/Sanctum/Braziers";
+if(!AssetDatabase.IsValidFolder(folder))AssetDatabase.CreateFolder("Assets/Dungeon/Sanctum","Braziers");
+var lit=AssetDatabase.LoadAssetAtPath<Material>("Assets/Dungeon/Sanctum/Blue Grey Limestone.mat").shader;
+System.Func<string,Color,float,Material> mat=(name,color,emissiveStrength)=>{
+    var m=new Material(lit);m.name=name;m.SetColor("_BaseColor",color);m.SetFloat("_Smoothness",.3f);
+    if(emissiveStrength>0){m.EnableKeyword("_EMISSION");m.SetColor("_EmissionColor",color*emissiveStrength);}
+    AssetDatabase.CreateAsset(m,folder+"/"+name+".mat");return m;
+};
+var stone=AssetDatabase.LoadAssetAtPath<Material>("Assets/Dungeon/Sanctum/Blue Grey Limestone.mat");
+var brass=AssetDatabase.LoadAssetAtPath<Material>("Assets/Dungeon/Sanctum/Antique Brass Inlay.mat");
+var dark=AssetDatabase.LoadAssetAtPath<Material>("Assets/Dungeon/Sanctum/Recessed Basalt.mat");
+var orange=mat("Living Amber",new Color(1,.22f,.015f),1.8f);
+var gold=mat("Golden Flame",new Color(1,.57f,.055f),2.2f);
+var core=mat("Hot Flame Core",new Color(1,.86f,.36f),2.4f);
+var template=new GameObject("Sanctum Brazier");
+var cube=Resources.GetBuiltinResource<Mesh>("Cube.fbx");
+System.Func<string,Vector3,Vector3,Material,GameObject> box=(name,p,s,m)=>{
+    var g=new GameObject(name);g.transform.SetParent(template.transform,false);g.transform.localPosition=p;g.transform.localScale=s;
+    g.AddComponent<MeshFilter>().sharedMesh=cube;g.AddComponent<MeshRenderer>().sharedMaterial=m;return g;
+};
+// Lathed low-poly profiles create a genuinely hollow bowl and faceted stone base.
+System.Func<string,Vector2[],Material,GameObject> lathe=(name,profile,m)=>{
+    int n=12;var vertices=new Vector3[profile.Length*(n+1)];
+    var triangles=new System.Collections.Generic.List<int>();
+    for(int j=0;j<profile.Length;j++)for(int i=0;i<=n;i++){
+        float a=i*Mathf.PI*2/n+Mathf.PI/12;
+        vertices[j*(n+1)+i]=new Vector3(Mathf.Cos(a)*profile[j].x,profile[j].y,Mathf.Sin(a)*profile[j].x);
+        if(j<profile.Length-1 && i<n){int k=j*(n+1)+i;triangles.AddRange(new[]{k,k+n+1,k+1,k+1,k+n+1,k+n+2});}
+    }
+    var mesh=new Mesh();mesh.name=name;mesh.vertices=vertices;mesh.triangles=triangles.ToArray();mesh.RecalculateNormals();mesh.RecalculateBounds();
+    AssetDatabase.CreateAsset(mesh,folder+"/"+name+".asset");
+    var g=new GameObject(name);g.transform.SetParent(template.transform,false);g.AddComponent<MeshFilter>().sharedMesh=mesh;g.AddComponent<MeshRenderer>().sharedMaterial=m;return g;
+};
+lathe("Carved Plinth",new[]{new Vector2(0,0),new Vector2(.84f,0),new Vector2(.84f,.25f),new Vector2(.72f,.4f),new Vector2(.65f,.52f),new Vector2(.62f,2.48f),new Vector2(.74f,2.62f),new Vector2(.74f,2.82f),new Vector2(0,2.82f)},stone);
+lathe("Foot Brass Band",new[]{new Vector2(.845f,.23f),new Vector2(.845f,.32f),new Vector2(.73f,.41f)},brass);
+lathe("Neck Collar",new[]{new Vector2(.63f,2.33f),new Vector2(.73f,2.48f),new Vector2(.76f,2.57f)},brass);
+lathe("Open Fire Bowl",new[]{new Vector2(0,2.72f),new Vector2(.43f,2.72f),new Vector2(.57f,2.89f),new Vector2(.89f,3.32f),new Vector2(.91f,3.46f),new Vector2(.76f,3.46f),new Vector2(.73f,3.29f),new Vector2(.34f,2.97f),new Vector2(0,2.97f)},dark);
+lathe("Bowl Brass Lip",new[]{new Vector2(.89f,3.29f),new Vector2(.94f,3.37f),new Vector2(.94f,3.49f),new Vector2(.75f,3.49f),new Vector2(.75f,3.4f)},brass);
+lathe("Ember Bed",new[]{new Vector2(0,3.3f),new Vector2(.66f,3.3f),new Vector2(.66f,3.34f),new Vector2(0,3.34f)},orange);
+for(int i=0;i<8;i++){
+    float a=i*Mathf.PI/4;Vector3 radial=new Vector3(Mathf.Sin(a),0,Mathf.Cos(a));
+    var recess=box("Shaft Recess",radial*.624f+Vector3.up*1.46f,new Vector3(.23f,1.52f,.035f),dark);recess.transform.localRotation=Quaternion.Euler(0,a*Mathf.Rad2Deg,0);
+    var glyph=box("Ember Rune",radial*.65f+Vector3.up*1.59f,new Vector3(.055f,.48f,.03f),gold);glyph.transform.localRotation=Quaternion.Euler(0,a*Mathf.Rad2Deg,0);
+    var tip=box("Rune Diamond",radial*.654f+Vector3.up*1.93f,new Vector3(.13f,.13f,.025f),brass);tip.transform.localRotation=Quaternion.Euler(0,a*Mathf.Rad2Deg,45);
+    var claw=box("Crown Prong",radial*.82f+Vector3.up*3.55f,new Vector3(.12f,.48f,.13f),brass);claw.transform.localRotation=Quaternion.Euler(-18,a*Mathf.Rad2Deg,0);
+}
+// Merge only the rigid parts; one shared set of meshes serves all ten instances.
+var buckets=new System.Collections.Generic.Dictionary<Material,System.Collections.Generic.List<MeshFilter>>();
+foreach(var mf in template.GetComponentsInChildren<MeshFilter>()){
+    var m=mf.GetComponent<MeshRenderer>().sharedMaterial;if(!buckets.ContainsKey(m))buckets[m]=new System.Collections.Generic.List<MeshFilter>();buckets[m].Add(mf);
+}
+int meshIndex=0;
+foreach(var bucket in buckets){
+    var combines=new CombineInstance[bucket.Value.Count];for(int i=0;i<combines.Length;i++){combines[i].mesh=bucket.Value[i].sharedMesh;combines[i].transform=bucket.Value[i].transform.localToWorldMatrix;}
+    var mesh=new Mesh();mesh.name="Brazier "+bucket.Key.name;mesh.CombineMeshes(combines,true,true);AssetDatabase.CreateAsset(mesh,folder+"/Assembly"+meshIndex+++".asset");
+    var g=new GameObject(bucket.Key.name);g.transform.SetParent(template.transform,false);g.AddComponent<MeshFilter>().sharedMesh=mesh;g.AddComponent<MeshRenderer>().sharedMaterial=bucket.Key;
+    foreach(var mf in bucket.Value)UnityEngine.Object.DestroyImmediate(mf.gameObject);
+}
+var flame=new GameObject("Flickering Flame");flame.transform.SetParent(template.transform,false);flame.transform.localPosition=new Vector3(0,3.32f,0);
+// Twisted tapering tongues give the flame a pointed silhouette, including in edit mode.
+System.Action<string,Vector3,float,float,Material> tongue=(name,offset,height,width,m)=>{
+    int rings=5,sides=7;var vertices=new Vector3[rings*sides];var triangles=new System.Collections.Generic.List<int>();
+    float[] radii={.75f,1f,.72f,.36f,0f};
+    for(int j=0;j<rings;j++)for(int i=0;i<sides;i++){
+        float t=j/(float)(rings-1),a=i*Mathf.PI*2/sides+t*.9f;
+        vertices[j*sides+i]=offset+new Vector3(Mathf.Cos(a)*width*radii[j]+Mathf.Sin(t*3)*width*.5f,t*height,Mathf.Sin(a)*width*radii[j]);
+        if(j<rings-1){int k=j*sides+i,kn=j*sides+(i+1)%sides;triangles.AddRange(new[]{k,k+sides,kn,kn,k+sides,kn+sides});}
+    }
+    var mesh=new Mesh();mesh.name=name;mesh.vertices=vertices;mesh.triangles=triangles.ToArray();mesh.RecalculateNormals();mesh.RecalculateBounds();AssetDatabase.CreateAsset(mesh,folder+"/"+name+".asset");
+    var g=new GameObject(name);g.transform.SetParent(flame.transform,false);g.AddComponent<MeshFilter>().sharedMesh=mesh;var r=g.AddComponent<MeshRenderer>();r.sharedMaterial=m;r.shadowCastingMode=UnityEngine.Rendering.ShadowCastingMode.Off;
+};
+tongue("Outer Flame",Vector3.zero,1.48f,.31f,orange);
+tongue("Forked Flame A",new Vector3(.32f,0,.05f),.96f,.16f,gold);
+tongue("Forked Flame B",new Vector3(-.25f,0,-.12f),1.12f,.16f,orange);
+tongue("Bright Heart",new Vector3(0,.01f,.19f),.79f,.18f,core);
+var lightObject=new GameObject("Firelight");lightObject.transform.SetParent(template.transform,false);lightObject.transform.localPosition=new Vector3(0,4.12f,0);
+var fireLight=lightObject.AddComponent<Light>();fireLight.type=LightType.Point;fireLight.color=new Color(1,.43f,.12f);fireLight.intensity=4.5f;fireLight.range=7;fireLight.shadows=LightShadows.None;
+var sparksObject=new GameObject("Rising Embers");sparksObject.transform.SetParent(template.transform,false);sparksObject.transform.localPosition=new Vector3(0,3.65f,0);sparksObject.transform.localRotation=Quaternion.Euler(-90,0,0);
+var sparks=sparksObject.AddComponent<ParticleSystem>();sparks.Stop(true,ParticleSystemStopBehavior.StopEmittingAndClear);
+var main=sparks.main;main.loop=true;main.startLifetime=new ParticleSystem.MinMaxCurve(.7f,1.5f);main.startSpeed=new ParticleSystem.MinMaxCurve(.7f,1.4f);main.startSize=new ParticleSystem.MinMaxCurve(.025f,.055f);main.startColor=new Color(1,.56f,.08f);main.maxParticles=16;main.simulationSpace=ParticleSystemSimulationSpace.World;main.gravityModifier=-.015f;
+var emission=sparks.emission;emission.rateOverTime=6;
+var shape=sparks.shape;shape.shapeType=ParticleSystemShapeType.Cone;shape.angle=12;shape.radius=.25f;
+var size=sparks.sizeOverLifetime;size.enabled=true;size.size=new ParticleSystem.MinMaxCurve(1,AnimationCurve.Linear(0,1,1,0));
+var sparkMaterial=new Material(Shader.Find("Universal Render Pipeline/Particles/Unlit"));sparkMaterial.name="Golden Sparks";sparkMaterial.SetColor("_BaseColor",new Color(1,.65f,.15f));AssetDatabase.CreateAsset(sparkMaterial,folder+"/Golden Sparks.mat");
+sparks.GetComponent<ParticleSystemRenderer>().sharedMaterial=sparkMaterial;
+var ambience=template.AddComponent<DungeonBrazierAmbience>();ambience.flame=flame.transform;ambience.fireLight=fireLight;
+var prefab=PrefabUtility.SaveAsPrefabAsset(template,folder+"/Sanctum Brazier.prefab");UnityEngine.Object.DestroyImmediate(template);
+var root=new GameObject("Sanctum Fire Braziers");Undo.RegisterCreatedObjectUndo(root,"Decorate flame traps");
+var existing=GameObject.Find("Dungeon Boss Room").transform.Find("05 Braziers and Lighting");int count=0;
+foreach(Transform t in existing){
+    if(t.name=="Brazier Pedestal" || t.name=="Amber Ember"){
+        var renderer=t.GetComponent<Renderer>();Undo.RecordObject(renderer,"Replace brazier visuals");renderer.enabled=false;
+    }
+    if(t.name!="Amber Ember")continue;
+    var instance=(GameObject)PrefabUtility.InstantiatePrefab(prefab);instance.name="Fire Brazier "+(++count).ToString("00");instance.transform.SetParent(root.transform,false);
+    instance.transform.position=new Vector3(t.position.x,0,t.position.z);
+    // Face the bright flame core into the arena on both walls.
+    instance.transform.rotation=Quaternion.Euler(0,t.position.x<0?90:-90,0);
+    PrefabUtility.RecordPrefabInstancePropertyModifications(instance.transform);
+}
+AssetDatabase.SaveAssets();UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(root.scene);SceneView.RepaintAll();
+return new {braziers=count,addedColliders=root.GetComponentsInChildren<Collider>().Length,prefab=AssetDatabase.GetAssetPath(prefab)};
