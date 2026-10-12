@@ -24,7 +24,7 @@ public class DungeonFlameTraps : MonoBehaviour
     void Awake()
     {
         player = FindFirstObjectByType<DungeonArcher>();
-        boss = FindFirstObjectByType<DungeonBoss>();
+        boss = FindFirstObjectByType<DungeonBoss>(FindObjectsInactive.Include);
         var room = GameObject.Find("Dungeon Boss Room");
         if (room != null)
             foreach (Transform t in room.transform.Find("05 Braziers and Lighting"))

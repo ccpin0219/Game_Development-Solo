@@ -22,7 +22,7 @@ public class DungeonHealingPickups : MonoBehaviour
     void Awake()
     {
         player = FindFirstObjectByType<DungeonArcher>();
-        boss = FindFirstObjectByType<DungeonBoss>();
+        boss = FindFirstObjectByType<DungeonBoss>(FindObjectsInactive.Include);
         green = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
         green.color = new Color(.05f,1f,.2f);
         ResetTimer();

@@ -1,0 +1,81 @@
+if(EditorApplication.isPlaying)return "Exit play mode first.";
+const string folder="Assets/Dungeon/Skeleton";
+if(GameObject.Find("Skeleton Encounters")!=null)return "Skeletons already exist.";
+if(!AssetDatabase.IsValidFolder(folder))AssetDatabase.CreateFolder("Assets/Dungeon","Skeleton");
+var shader=AssetDatabase.LoadAssetAtPath<Material>("Assets/Dungeon/Guardian/Weathered Ivory Basalt.mat").shader;
+System.Func<string,Color,float,Material> mat=(name,color,metal)=>{var m=new Material(shader);m.name=name;m.SetColor("_BaseColor",color);m.SetFloat("_Metallic",metal);m.SetFloat("_Smoothness",.25f);AssetDatabase.CreateAsset(m,folder+"/"+name+".mat");return m;};
+var bone=mat("Ancient Bone",new Color(.79f,.73f,.57f),0);var shadow=mat("Bone Cavities",new Color(.035f,.025f,.02f),0);
+var iron=mat("Axe Iron",new Color(.27f,.32f,.35f),.7f);var steel=mat("Axe Cutting Edge",new Color(.63f,.69f,.7f),.65f);var leather=mat("Old Leather",new Color(.16f,.09f,.045f),0);
+var eye=mat("Skeleton Ember Eyes",new Color(1,.35f,.03f),0);eye.globalIlluminationFlags=MaterialGlobalIlluminationFlags.BakedEmissive;eye.EnableKeyword("_EMISSION");eye.SetColor("_EmissionColor",new Color(1,.13f,.01f)*2);
+var block=AssetDatabase.LoadAssetAtPath<Mesh>("Assets/Dungeon/Guardian/Bevel Block.asset");var sphere=Resources.GetBuiltinResource<Mesh>("Sphere.fbx");
+var root=new GameObject("Axe Skeleton");var model=new GameObject("Skeleton Model").transform;model.SetParent(root.transform,false);
+System.Func<string,Transform,Vector3,Transform> pivot=(name,parent,pos)=>{var g=new GameObject(name);g.transform.SetParent(parent,false);g.transform.localPosition=pos;return g.transform;};
+System.Func<string,Transform,Vector3,Vector3,Material,GameObject> box=(name,parent,pos,scale,m)=>{var g=new GameObject(name);g.transform.SetParent(parent,false);g.transform.localPosition=pos;g.transform.localScale=scale;g.AddComponent<MeshFilter>().sharedMesh=block;g.AddComponent<MeshRenderer>().sharedMaterial=m;return g;};
+System.Action<Transform,Vector3,Vector3,float> limb=(parent,a,b,width)=>{var g=box("Bone",parent,(a+b)*.5f,new Vector3(width,Vector3.Distance(a,b),width),bone);g.transform.localRotation=Quaternion.FromToRotation(Vector3.up,b-a);foreach(var p in new[]{a,b}){var j=box("Bone Joint",parent,p,Vector3.one*(width*1.3f),bone);j.GetComponent<MeshFilter>().sharedMesh=sphere;}};
+var torso=pivot("Ribcage",model,new Vector3(0,1.32f,0));
+limb(torso,new Vector3(0,-.34f,-.07f),new Vector3(0,.42f,-.07f),.11f);
+for(int i=0;i<5;i++){
+    float y=.3f-i*.11f;float w=.31f-i*.018f;
+    foreach(float side in new[]{-1f,1f}){
+        Vector3 previous=new Vector3(0,y,-.07f);
+        for(int k=1;k<=5;k++){float a=k*Mathf.PI/5;var next=new Vector3(side*Mathf.Sin(a)*w,y-Mathf.Sin(a)*.065f,-.07f+(1-Mathf.Cos(a))*.13f);limb(torso,previous,next,.042f);previous=next;}
+    }
+}
+limb(torso,new Vector3(-.32f,.37f,0),new Vector3(.32f,.37f,0),.085f);
+box("Sternum",torso,new Vector3(0,.09f,.2f),new Vector3(.08f,.44f,.07f),bone);
+var skull=pivot("Skull",model,new Vector3(0,1.94f,0));
+box("Cranium",skull,new Vector3(0,.04f,0),new Vector3(.43f,.42f,.37f),bone);
+box("Jaw",skull,new Vector3(0,-.19f,.045f),new Vector3(.33f,.11f,.28f),bone);
+foreach(float s in new[]{-1f,1f}){
+    var socket=box("Deep Eye Socket",skull,new Vector3(s*.105f,.035f,.188f),new Vector3(.145f,.135f,.027f),shadow);socket.transform.localRotation=Quaternion.Euler(0,0,s*10);
+    box("Eye Ember",skull,new Vector3(s*.106f,.026f,.207f),new Vector3(.044f,.046f,.017f),eye);
+    box("Cheekbone",skull,new Vector3(s*.155f,-.083f,.17f),new Vector3(.105f,.065f,.09f),bone);
+}
+var nose=box("Nasal Cavity",skull,new Vector3(0,-.065f,.194f),new Vector3(.063f,.085f,.018f),shadow);nose.transform.localRotation=Quaternion.Euler(0,0,45);
+box("Mouth Cavity",skull,new Vector3(0,-.128f,.168f),new Vector3(.28f,.08f,.02f),shadow);
+for(int i=0;i<6;i++)box("Tooth",skull,new Vector3(-.12f+i*.048f,-.12f,.19f),new Vector3(.032f,.07f,.045f),bone);
+limb(model,new Vector3(0,1.72f,0),new Vector3(0,1.82f,0),.1f);
+box("Pelvis",model,new Vector3(0,.96f,0),new Vector3(.43f,.2f,.23f),bone);
+box("Belt",model,new Vector3(0,1.04f,0),new Vector3(.46f,.09f,.27f),leather);
+var legs=new System.Collections.Generic.List<Transform>();var arms=new System.Collections.Generic.List<Transform>();
+foreach(float s in new[]{-1f,1f}){
+    var leg=pivot(s<0?"Left Leg":"Right Leg",model,new Vector3(s*.17f,.9f,0));legs.Add(leg);
+    limb(leg,Vector3.zero,new Vector3(s*.025f,-.38f,.025f),.09f);
+    limb(leg,new Vector3(s*.025f,-.38f,.025f),new Vector3(0,-.77f,0),.07f);
+    limb(leg,new Vector3(s*.065f,-.42f,.015f),new Vector3(s*.065f,-.76f,0),.035f);
+    box("Foot",leg,new Vector3(0,-.83f,.095f),new Vector3(.17f,.1f,.34f),bone);
+    for(int i=0;i<3;i++)box("Toe",leg,new Vector3(-.057f+i*.057f,-.835f,.26f),new Vector3(.035f,.075f,.11f),bone);
+    var arm=pivot(s<0?"Free Arm":"Axe Arm",model,new Vector3(s*.37f,1.68f,0));arms.Add(arm);
+    limb(arm,Vector3.zero,new Vector3(s*.06f,-.37f,0),.08f);
+    limb(arm,new Vector3(s*.06f,-.37f,0),new Vector3(s*.035f,-.73f,.075f),.058f);
+    limb(arm,new Vector3(s*.13f,-.38f,0),new Vector3(s*.095f,-.73f,.075f),.03f);
+    box("Hand",arm,new Vector3(s*.04f,-.79f,.08f),new Vector3(.14f,.18f,.11f),bone);
+    for(int i=0;i<3;i++)box("Finger",arm,new Vector3(s*.04f-.047f+i*.047f,-.9f,.1f),new Vector3(.029f,.1f,.06f),bone);
+}
+var axeArm=arms[1];
+box("Axe Haft",axeArm,new Vector3(.04f,-1.02f,.1f),new Vector3(.075f,1.05f,.075f),leather);
+for(int i=0;i<5;i++)box("Grip Wrap",axeArm,new Vector3(.04f,-.7f-i*.07f,.1f),new Vector3(.094f,.026f,.094f),iron);
+Vector2[] outline={new Vector2(0,.14f),new Vector2(.32f,.29f),new Vector2(.59f,.18f),new Vector2(.68f,-.16f),new Vector2(.47f,-.39f),new Vector2(.08f,-.24f),new Vector2(0,-.09f)};
+var av=new System.Collections.Generic.List<Vector3>();var at=new System.Collections.Generic.List<int>();
+foreach(float z in new[]{-.045f,.045f})foreach(var p in outline)av.Add(new Vector3(p.x,p.y,z));
+int n=outline.Length;for(int i=1;i<n-1;i++){at.AddRange(new[]{0,i,i+1,n,n+i+1,n+i});}for(int i=0;i<n;i++){int j=(i+1)%n;at.AddRange(new[]{i,n+i,j,j,n+i,n+j});}
+var blade=new Mesh();blade.name="Broad Axe Blade";blade.SetVertices(av);blade.SetTriangles(at,0);blade.RecalculateNormals();AssetDatabase.CreateAsset(blade,folder+"/Axe Blade.asset");
+var axe=box("Axe Blade",axeArm,new Vector3(.02f,-1.25f,.1f),Vector3.one,steel);axe.GetComponent<MeshFilter>().sharedMesh=blade;
+box("Axe Socket",axeArm,new Vector3(.04f,-1.24f,.1f),new Vector3(.14f,.38f,.16f),iron);
+box("Shoulder Armour",torso,new Vector3(.35f,.38f,0),new Vector3(.37f,.18f,.4f),iron);
+// Consolidate by animated section and material while keeping all bones and axe on the rig.
+int mi=0;foreach(var section in new[]{torso,skull,legs[0],legs[1],arms[0],arms[1]}){
+    foreach(var batch in section.GetComponentsInChildren<MeshFilter>().GroupBy(f=>f.GetComponent<Renderer>().sharedMaterial).ToArray()){
+        var mesh=new Mesh();mesh.name="Skeleton section";mesh.CombineMeshes(batch.Select(f=>new CombineInstance{mesh=f.sharedMesh,transform=section.worldToLocalMatrix*f.transform.localToWorldMatrix}).ToArray(),true,true);AssetDatabase.CreateAsset(mesh,folder+"/Section"+(mi++)+".asset");
+        var obj=new GameObject(batch.Key.name);obj.transform.SetParent(section,false);obj.AddComponent<MeshFilter>().sharedMesh=mesh;obj.AddComponent<MeshRenderer>().sharedMaterial=batch.Key;
+        foreach(var f in batch)UnityEngine.Object.DestroyImmediate(f.gameObject);
+    }
+}
+var controller=root.AddComponent<CharacterController>();controller.height=2.15f;controller.radius=.35f;controller.center=new Vector3(0,1.08f,0);controller.stepOffset=.25f;controller.skinWidth=.035f;
+var ai=root.AddComponent<DungeonSkeleton>();ai.model=model;ai.axeArm=arms[1];ai.freeArm=arms[0];ai.leftLeg=legs[0];ai.rightLeg=legs[1];ai.boneRenderers=root.GetComponentsInChildren<Renderer>().Where(r=>r.sharedMaterial==bone).ToArray();
+var prefab=PrefabUtility.SaveAsPrefabAsset(root,folder+"/Axe Skeleton.prefab");UnityEngine.Object.DestroyImmediate(root);
+var encounters=new GameObject("Skeleton Encounters");Undo.RegisterCreatedObjectUndo(encounters,"Add skeleton encounters");
+foreach(var p in new[]{new Vector3(-4,.08f,-174),new Vector3(6,.08f,-111),new Vector3(38,.08f,-108)}){
+    var g=(GameObject)PrefabUtility.InstantiatePrefab(prefab,encounters.transform);g.transform.position=p;g.transform.rotation=Quaternion.Euler(0,180,0);PrefabUtility.RecordPrefabInstancePropertyModifications(g.transform);
+}
+AssetDatabase.SaveAssets();UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(encounters.scene);return "Created axe skeleton prefab and three encounters.";

@@ -33,7 +33,7 @@ public class DungeonStartScreen : MonoBehaviour
     void Start()
     {
         player=FindFirstObjectByType<DungeonArcher>();
-        boss=FindFirstObjectByType<DungeonBoss>();
+        boss=FindFirstObjectByType<DungeonBoss>(FindObjectsInactive.Include);
         gameplayCamera=player.view;cameraWasEnabled=gameplayCamera.enabled;
         gameplayCamera.enabled=false;
         var cameraObject=new GameObject("Menu Dungeon Camera");
@@ -58,7 +58,7 @@ public class DungeonStartScreen : MonoBehaviour
             }
             return;
         }
-        if(!BattleEnded && ((player!=null && player.IsDead) || (boss!=null && boss.Defeated)))
+        if(!BattleEnded && ((player!=null && player.IsDead) || (boss!=null && boss.gameObject.activeInHierarchy && boss.Defeated)))
             BattleEnded=true;
         if(!BattleEnded)return;
         Cursor.lockState=CursorLockMode.None;Cursor.visible=true;

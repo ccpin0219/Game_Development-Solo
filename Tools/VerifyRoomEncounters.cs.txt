@@ -1,0 +1,50 @@
+Time.timeScale=0;
+UnityEngine.Object.FindFirstObjectByType<DungeonStartScreen>().StartBattle();
+var log=new System.Collections.Generic.List<string>();
+System.Action<bool,string> check=(ok,label)=>{ if(!ok)throw new System.Exception(label); log.Add("PASS "+label); };
+var player=UnityEngine.Object.FindFirstObjectByType<DungeonArcher>();
+var controller=player.GetComponent<CharacterController>();
+System.Action<Vector3> teleport=p=>{controller.enabled=false;player.transform.position=p;controller.enabled=true;Physics.SyncTransforms();};
+var rooms=UnityEngine.Object.FindObjectsByType<DungeonRoomEncounter>(FindObjectsSortMode.None);
+check(!DungeonStartScreen.BattleEnded,"dormant boss does not end game");
+foreach(var r in rooms.Where(r=>r.boss==null))
+{
+    teleport(new Vector3(0,.08f,-208));r.Simulate(.1f);
+    check(r.State==DungeonRoomEncounter.Phase.Dormant && r.enemies.All(e=>!e.gameObject.activeInHierarchy),r.roomName+" hidden before entry");
+    var p=r.entryBounds.center;p.y=.08f;
+    if(r.roomName=="순례자의 홀")p=new Vector3(0,.08f,-178.8f);
+    teleport(p);r.Simulate(.01f);
+    check(r.State==DungeonRoomEncounter.Phase.Closing && r.doorBlockers.All(d=>d.enabled) && r.enemies.All(e=>!e.gameObject.activeInHierarchy),r.roomName+" all exits lock before spawn");
+    Physics.SyncTransforms();
+    foreach(var d in r.doorBlockers)
+    {
+        var c=(BoxCollider)d; var center=c.transform.TransformPoint(c.center);
+        RaycastHit hit;
+        check(c.Raycast(new Ray(center-c.transform.forward*2,c.transform.forward),out hit,4),r.roomName+" portal physically blocks");
+    }
+    r.Simulate(.7f);Physics.SyncTransforms();
+    check(r.State==DungeonRoomEncounter.Phase.Fighting && r.RemainingEnemies==2,r.roomName+" two enemies activate");
+    foreach(var e in r.enemies)
+    {
+        var hits=Physics.OverlapCapsule(e.transform.position+Vector3.up*.5f,e.transform.position+Vector3.up*1.7f,.3f);
+        check(hits.All(h=>h.transform.IsChildOf(e.transform)),r.roomName+" enemy spawn clear of geometry");
+    }
+    r.enemies[0].TakeDamage(999);r.Simulate(.1f);
+    check(r.State==DungeonRoomEncounter.Phase.Fighting && r.RemainingEnemies==1 && r.doorBlockers.All(d=>d.enabled),r.roomName+" one survivor keeps all doors closed");
+    r.enemies[1].TakeDamage(999);r.Simulate(.7f);
+    check(r.State==DungeonRoomEncounter.Phase.Cleared && r.doorBlockers.All(d=>!d.enabled),r.roomName+" final kill opens every door");
+    teleport(new Vector3(0,.08f,-208));r.Simulate(.1f);teleport(p);r.Simulate(.7f);
+    check(r.State==DungeonRoomEncounter.Phase.Cleared && r.RemainingEnemies==0,r.roomName+" revisit stays cleared");
+}
+var arena=rooms.First(r=>r.boss!=null);
+teleport(new Vector3(0,.08f,-48));arena.Simulate(.7f);
+check(arena.State==DungeonRoomEncounter.Phase.Dormant,"boss room requires both seals");
+var exploration=UnityEngine.Object.FindFirstObjectByType<DungeonExploration>();
+exploration.ActivateSeal(0);exploration.ActivateSeal(1);exploration.Simulate(.01f);
+arena.Simulate(.7f);
+check(arena.State==DungeonRoomEncounter.Phase.Fighting && arena.boss.gameObject.activeInHierarchy && arena.boss.Health>0 && arena.doorBlockers.All(d=>d.enabled),"boss appears behind locked entrance");
+const string key="DungeonBoss.FastestClearSeconds.v1";
+bool had=PlayerPrefs.HasKey(key);float best=PlayerPrefs.GetFloat(key);
+try {arena.boss.TakeDamage(99999);arena.Simulate(.7f);check(arena.State==DungeonRoomEncounter.Phase.Cleared && arena.doorBlockers.All(d=>!d.enabled),"boss defeat opens entrance");}
+finally {if(had)PlayerPrefs.SetFloat(key,best);else PlayerPrefs.DeleteKey(key);PlayerPrefs.Save();}
+return string.Join("\n",log);

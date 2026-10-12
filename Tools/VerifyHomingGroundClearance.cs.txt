@@ -1,0 +1,23 @@
+Time.timeScale=0;UnityEngine.Object.FindFirstObjectByType<DungeonStartScreen>().StartBattle();
+var p=UnityEngine.Object.FindFirstObjectByType<DungeonArcher>();
+var prefab=AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Dungeon/Skeleton/Axe Skeleton.prefab");
+var ground=GameObject.CreatePrimitive(PrimitiveType.Cube);ground.name="Shard Test Ground";ground.transform.localScale=new Vector3(30,1,30);
+var logs=new System.Collections.Generic.List<string>();
+try{
+foreach(float floorY in new[]{0f,4f})foreach(float y in new[]{.05f,.15f,.3f,.4f,.7f,1.2f,1.8f}){
+ ground.transform.position=new Vector3(1000,floorY-.5f,3);
+ var e=UnityEngine.Object.Instantiate(prefab,new Vector3(1000,floorY+.08f,3),Quaternion.identity).GetComponent<DungeonSkeleton>();e.enabled=false;
+ var g=new GameObject("Low Shot Test");g.transform.position=new Vector3(1000,floorY+1.2f,0);var a=g.AddComponent<DungeonArrow>();
+ a.Initialize((new Vector3(1000,floorY+y,3)-g.transform.position).normalized*40,20,p.GetComponent<Collider>(),p.wood,p.metal,DungeonArrow.ShotKind.Split);
+ Physics.SyncTransforms();a.Simulate(.15f);
+ bool direct=e.Health<75;
+ var shards=UnityEngine.Object.FindObjectsByType<DungeonArrow>(FindObjectsSortMode.None).Where(s=>s.Kind==DungeonArrow.ShotKind.Homing).ToArray();
+ float minY=999;
+ foreach(var s in shards)for(int i=0;i<200&&!s.HasHit;i++){s.Simulate(.01f);minY=Mathf.Min(minY,s.transform.position.y-floorY);}
+ bool ok=shards.Length==3&&shards.All(s=>s.HasHit&&s.transform.parent==e.transform)&&Mathf.Abs(e.Health-(direct?31:51))<.001f&&minY>=0;
+ logs.Add((ok?"PASS":"FAIL")+" floor="+floorY+" aim="+y+" direct="+direct+" health="+e.Health+" minY="+minY);
+ foreach(var ar in UnityEngine.Object.FindObjectsByType<DungeonArrow>(FindObjectsSortMode.None))UnityEngine.Object.DestroyImmediate(ar.gameObject);
+ UnityEngine.Object.DestroyImmediate(e.gameObject);
+}
+return string.Join("\n",logs);
+}finally{UnityEngine.Object.DestroyImmediate(ground);Time.timeScale=1;}

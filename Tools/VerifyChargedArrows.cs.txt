@@ -1,0 +1,36 @@
+Time.timeScale=0;
+var player=UnityEngine.Object.FindFirstObjectByType<DungeonArcher>();
+UnityEngine.Object.FindFirstObjectByType<DungeonStartScreen>().StartBattle();
+var owner=player.GetComponent<Collider>();
+var results=new System.Collections.Generic.List<object>();
+var originals=UnityEngine.Object.FindObjectsByType<DungeonSkeleton>(FindObjectsSortMode.None).Select(s=>s.gameObject).Concat(UnityEngine.Object.FindObjectsByType<DungeonBoss>(FindObjectsSortMode.None).Select(b=>b.gameObject)).ToArray();
+foreach(var g in originals)g.SetActive(false);
+var created=new System.Collections.Generic.List<GameObject>();
+var prefab=AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Dungeon/Skeleton/Axe Skeleton.prefab");
+System.Func<float,float,DungeonSkeleton> enemy=(x,z)=>{var g=UnityEngine.Object.Instantiate(prefab,new Vector3(1000+x,0,z),Quaternion.identity);created.Add(g);var s=g.GetComponent<DungeonSkeleton>();s.enabled=false;return s;};
+System.Func<DungeonArrow.ShotKind,float,DungeonArrow> arrow=(kind,damage)=>{var g=new GameObject("Charge Test Arrow");g.transform.position=new Vector3(1000,1.2f,0);var a=g.AddComponent<DungeonArrow>();a.Initialize(Vector3.forward*40,damage,owner,player.wood,player.metal,kind);return a;};
+System.Action clear=()=>{foreach(var a in UnityEngine.Object.FindObjectsByType<DungeonArrow>(FindObjectsSortMode.None))UnityEngine.Object.DestroyImmediate(a.gameObject);foreach(var g in created)if(g!=null)UnityEngine.Object.DestroyImmediate(g);created.Clear();};
+try{
+ var a=enemy(0,3);var b=enemy(0,6);var wall=GameObject.CreatePrimitive(PrimitiveType.Cube);wall.transform.position=new Vector3(1000,1.2f,9);wall.transform.localScale=new Vector3(5,4,.2f);created.Add(wall);Physics.SyncTransforms();
+ var shot=arrow(DungeonArrow.ShotKind.Power,20);shot.Simulate(.3f);
+ results.Add(new{test="Power shot stops at first enemy and cannot hit the one behind",passed=a.Health==55&&b.Health==75&&shot.HasHit,a=a.Health,b=b.Health});clear();
+ a=enemy(0,3);b=enemy(4,3);Physics.SyncTransforms();shot=arrow(DungeonArrow.ShotKind.Split,25);shot.Simulate(.1f);
+ var shards=UnityEngine.Object.FindObjectsByType<DungeonArrow>(FindObjectsSortMode.None).Where(s=>s.Kind==DungeonArrow.ShotKind.Homing).ToArray();
+ results.Add(new{test="Direct hit creates exactly three locked shards",passed=shards.Length==3&&shards.All(s=>s.Target==a)&&a.Health==50});
+ foreach(var s in shards)for(int i=0;i<150&&!s.HasHit;i++)s.Simulate(.02f);
+ results.Add(new{test="All three hit original survivor, no recursive split",passed=Mathf.Abs(a.Health-(75-25*(1+3*DungeonArrow.HomingDamageRatio)))<.001f&&b.Health==75&&UnityEngine.Object.FindObjectsByType<DungeonArrow>(FindObjectsSortMode.None).Count(s=>s.Kind==DungeonArrow.ShotKind.Homing)==3,health=a.Health});clear();
+ a=enemy(0,3);b=enemy(3,4);Physics.SyncTransforms();shot=arrow(DungeonArrow.ShotKind.Split,25);shot.Simulate(.1f);shards=UnityEngine.Object.FindObjectsByType<DungeonArrow>(FindObjectsSortMode.None).Where(s=>s.Kind==DungeonArrow.ShotKind.Homing).ToArray();a.TakeDamage(100);
+ foreach(var s in shards)s.Simulate(.02f);
+ results.Add(new{test="Target death retargets all shards",passed=shards.Length==3&&shards.All(s=>s.Target==b)});clear();
+ a=enemy(3,1);b=enemy(8,1);wall=GameObject.CreatePrimitive(PrimitiveType.Cube);wall.transform.position=new Vector3(1000,1.2f,3);wall.transform.localScale=new Vector3(2,4,.2f);created.Add(wall);Physics.SyncTransforms();shot=arrow(DungeonArrow.ShotKind.Split,25);shot.Simulate(.1f);shards=UnityEngine.Object.FindObjectsByType<DungeonArrow>(FindObjectsSortMode.None).Where(s=>s.Kind==DungeonArrow.ShotKind.Homing).ToArray();
+ results.Add(new{test="Wall hit chooses nearest enemy",passed=shards.Length==3&&shards.All(s=>s.Target==a)});clear();
+ a=enemy(0,3);a.TakeDamage(60);b=enemy(3,4);Physics.SyncTransforms();shot=arrow(DungeonArrow.ShotKind.Split,25);shot.Simulate(.1f);shards=UnityEngine.Object.FindObjectsByType<DungeonArrow>(FindObjectsSortMode.None).Where(s=>s.Kind==DungeonArrow.ShotKind.Homing).ToArray();results.Add(new{test="Lethal primary hit immediately chooses next enemy",passed=a.Health==0&&shards.Length==3&&shards.All(s=>s.Target==b)});clear();
+ a=enemy(0,3);Physics.SyncTransforms();shot=arrow(DungeonArrow.ShotKind.Normal,25);shot.Simulate(.1f);results.Add(new{test="Normal shot remains unsplit",passed=shot.HasHit&&a.Health==50&&UnityEngine.Object.FindObjectsByType<DungeonArrow>(FindObjectsSortMode.None).All(s=>s.Kind!=DungeonArrow.ShotKind.Homing)});clear();
+ foreach(bool full in new[]{false,true})foreach(var mode in new[]{DungeonArcher.AttackMode.Heavy,DungeonArcher.AttackMode.Rapid}){
+  if(player.Mode!=mode)player.ToggleAttackMode();typeof(DungeonArcher).GetField("cooldown",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance).SetValue(player,0f);
+  player.BeginDraw();player.AdvanceCharge(player.CurrentChargeSeconds*(full?1:.5f));player.ReleaseArrow();var fired=UnityEngine.Object.FindFirstObjectByType<DungeonArrow>();
+  var expected=!full?DungeonArrow.ShotKind.Normal:mode==DungeonArcher.AttackMode.Heavy?DungeonArrow.ShotKind.Power:DungeonArrow.ShotKind.Split;
+  results.Add(new{test=mode+" "+(full?"full":"partial"),passed=fired.Kind==expected,damage=fired.Damage});clear();
+ }
+}finally{clear();foreach(var g in originals)g.SetActive(true);}
+return results;
