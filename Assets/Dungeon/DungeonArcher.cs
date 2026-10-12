@@ -7,6 +7,14 @@ public class DungeonArcher : MonoBehaviour
     public Camera view;
     public Material wood, metal, stringMaterial;
     public float moveSpeed = 8f, chargeSeconds = 1.2f;
+    public enum AttackMode { Heavy, Rapid }
+    public AttackMode Mode { get; private set; } = AttackMode.Heavy;
+    [Min(.05f)] public float rapidChargeSeconds = .35f;
+    [Min(1)] public float heavyDamage = 90f, rapidDamage = 25f;
+    [Min(0)] public float heavyReloadSeconds = .35f, rapidReloadSeconds = .12f;
+    public float CurrentChargeSeconds => Mathf.Max(.05f, Mode == AttackMode.Heavy ? chargeSeconds : rapidChargeSeconds);
+    public float CurrentMaxDamage => Mode == AttackMode.Heavy ? heavyDamage : rapidDamage;
+    public float CurrentReloadSeconds => Mode == AttackMode.Heavy ? heavyReloadSeconds : rapidReloadSeconds;
     public float Charge { get; private set; }
     public float CurrentMoveSpeed => moveSpeed * (drawing ? Mathf.Lerp(.8f, .35f, Charge) : 1f);
     public int ShotsFired { get; private set; }
@@ -30,9 +38,26 @@ public class DungeonArcher : MonoBehaviour
     }
     void Start() { if(DungeonStartScreen.BattleStarted)LockCursor(); }
     void LockCursor() { Cursor.lockState = CursorLockMode.Locked; Cursor.visible = false; }
-    void OnDisable() { Cursor.lockState = CursorLockMode.None; Cursor.visible = true; }
+    void OnDisable() { CancelDraw(); Cursor.lockState = CursorLockMode.None; Cursor.visible = true; }
     void OnApplicationFocus(bool focus) { if (!focus) CancelDraw(); }
     void CancelDraw() { drawing = false; Charge = 0; }
+    public void ToggleAttackMode()
+    {
+        if (IsDead || !DungeonStartScreen.BattleStarted || DungeonStartScreen.BattleEnded) return;
+        CancelDraw();
+        Mode = Mode == AttackMode.Heavy ? AttackMode.Rapid : AttackMode.Heavy;
+        // Preserve the previous shot's reload so switching cannot bypass it.
+    }
+    public bool BeginDraw()
+    {
+        if (IsDead || !DungeonStartScreen.BattleStarted || DungeonStartScreen.BattleEnded || cooldown > 0) return false;
+        drawing = true;
+        return true;
+    }
+    public void AdvanceCharge(float dt)
+    {
+        if (drawing && dt > 0) Charge = Mathf.Clamp01(Charge + dt / CurrentChargeSeconds);
+    }
 
     public void TakeDamage(float damage)
     {
@@ -79,14 +104,18 @@ public class DungeonArcher : MonoBehaviour
         if (controller.isGrounded && keys.spaceKey.wasPressedThisFrame) verticalSpeed = 6;
         verticalSpeed -= 20 * Time.deltaTime;
         cooldown = Mathf.Max(0, cooldown - Time.deltaTime);
-        if (mouse.rightButton.wasPressedThisFrame)
+        if (keys.tabKey.wasPressedThisFrame)
+        {
+            ToggleAttackMode();
+        }
+        else if (mouse.rightButton.wasPressedThisFrame)
         {
             CancelDraw();
         }
         else
         {
-            if (mouse.leftButton.wasPressedThisFrame && cooldown <= 0) drawing = true;
-            if (drawing) Charge = Mathf.Clamp01(Charge + Time.deltaTime / chargeSeconds);
+            if (mouse.leftButton.wasPressedThisFrame) BeginDraw();
+            AdvanceCharge(Time.deltaTime);
             if (drawing && mouse.leftButton.wasReleasedThisFrame) ReleaseArrow();
         }
         // Apply this frame's charge state so release/cancel restores speed immediately.
@@ -96,14 +125,15 @@ public class DungeonArcher : MonoBehaviour
 
     public void ReleaseArrow()
     {
-        if (IsDead) return;
+        if (IsDead || !drawing || cooldown > 0 || !DungeonStartScreen.BattleStarted || DungeonStartScreen.BattleEnded) return;
         float power = Charge;
         var projectile = new GameObject("Arrow");
         // Launch at the camera position so arrows cannot originate beyond a nearby wall.
         projectile.transform.SetPositionAndRotation(view.transform.position, view.transform.rotation);
         var arrow = projectile.AddComponent<DungeonArrow>();
-        arrow.Initialize(view.transform.forward * Mathf.Lerp(24, 75, power), Mathf.Lerp(10, 50, power), controller, wood, metal);
-        ShotsFired++; cooldown = .25f; CancelDraw();
+        float damage = Mathf.Lerp(CurrentMaxDamage * .2f, CurrentMaxDamage, power);
+        arrow.Initialize(view.transform.forward * Mathf.Lerp(24, 75, power), damage, controller, wood, metal);
+        ShotsFired++; cooldown = CurrentReloadSeconds; CancelDraw();
     }
 
     void UpdateBow()
@@ -182,9 +212,16 @@ public class DungeonArcher : MonoBehaviour
         GUI.DrawTexture(new Rect(x-7,y-1,14,2),Texture2D.whiteTexture);
         GUI.DrawTexture(new Rect(x-1,y-7,2,14),Texture2D.whiteTexture);
         GUI.color=new Color(.08f,.09f,.12f,.8f);GUI.DrawTexture(new Rect(x-61,y+27,122,8),Texture2D.whiteTexture);
-        GUI.color=Charge>=1?new Color(1,.7f,.2f):new Color(.65f,.85f,1);
+        Color modeColor=Mode==AttackMode.Heavy?new Color(1,.72f,.3f):new Color(.4f,.9f,1);
+        GUI.color=modeColor;
         GUI.DrawTexture(new Rect(x-60,y+28,120*Charge,6),Texture2D.whiteTexture);
         GUI.color=Color.white;
+        var modeStyle=new GUIStyle(GUI.skin.label){font=hudFont,fontSize=22,alignment=TextAnchor.MiddleRight};
+        modeStyle.normal.textColor=modeColor;
+        GUI.Label(new Rect(Screen.width-330,Screen.height-105,300,34),Mode==AttackMode.Heavy?"강공  ·  묵직한 한 발":"속공  ·  빠른 사격",modeStyle);
+        var hintStyle=new GUIStyle(modeStyle){fontSize=15};
+        hintStyle.normal.textColor=new Color(.8f,.83f,.85f);
+        GUI.Label(new Rect(Screen.width-330,Screen.height-70,300,28),"TAB 전환   |   장전 "+CurrentChargeSeconds.ToString("0.00")+"초",hintStyle);
         if(Cursor.lockState!=CursorLockMode.Locked)
         {
             var pauseStyle=new GUIStyle(GUI.skin.label){font=hudFont,fontSize=28,fontStyle=FontStyle.Bold,alignment=TextAnchor.MiddleCenter};

@@ -47,6 +47,7 @@ public class DungeonBoss : MonoBehaviour, IDungeonDamageable
     DungeonBossSpecialAttacks specials, circleAttacks, laserAttacks;
     DungeonBossLeap leap;
     DungeonBossFloorAttack floorAttack;
+    DungeonBossMotion motion;
 
     void Awake()
     {
@@ -94,6 +95,7 @@ public class DungeonBoss : MonoBehaviour, IDungeonDamageable
         leap.Initialize(this,player);
         floorAttack=gameObject.AddComponent<DungeonBossFloorAttack>();
         floorAttack.Initialize(this,player);
+        motion = new DungeonBossMotion(this, hammer);
     }
     public void BuildWeakPoints()
     {
@@ -166,15 +168,19 @@ public class DungeonBoss : MonoBehaviour, IDungeonDamageable
             upperBody.localPosition = Vector3.Lerp(upperBody.localPosition, restPosition + Vector3.down * 3, Time.deltaTime * 2);
             upperBody.localRotation = Quaternion.Slerp(upperBody.localRotation, Quaternion.Euler(-18,0,0), Time.deltaTime * 2);
         }
-        else
-        {
-            upperBody.localPosition = restPosition + Vector3.up * (Mathf.Sin(Time.time * 1.3f) * .09f);
-            upperBody.localRotation = Quaternion.Slerp(upperBody.localRotation, Quaternion.Euler(hammerPhase == 1 ? -8 : 0,0,0),Time.deltaTime*5);
-        }
+        if (motion != null && (Defeated || player == null || player.IsDead ||
+            (DungeonStartScreen.BattleStarted && Cursor.lockState == CursorLockMode.Locked)))
+            AnimateAttacks(Time.deltaTime);
+    }
+    public void AnimateAttacks(float dt)
+    {
+        motion.Apply(dt, Defeated || player == null || player.IsDead,
+            hammerPhase, stateTime, hammerImpactTimer,
+            volley, specials, circleAttacks, laserAttacks, floorAttack, leap);
     }
     public void Simulate(float dt)
     {
-        if(!DungeonStartScreen.BattleStarted)return;
+        if(!DungeonStartScreen.BattleStarted || !DungeonExploration.ArenaReady)return;
         if(Defeated || player==null || player.IsDead)return;
         BattleTime+=Mathf.Max(0,dt);
         if(openingDelay>0)
@@ -336,7 +342,7 @@ public class DungeonBoss : MonoBehaviour, IDungeonDamageable
     }
     void OnGUI()
     {
-        if(!DungeonStartScreen.BattleStarted)return;
+        if(!DungeonStartScreen.BattleStarted || !DungeonExploration.ArenaReady)return;
         float width = Mathf.Min(600, Screen.width * .55f), x = (Screen.width-width)*.5f;
         var label = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleCenter, fontSize = 20, font = timerFont };
         GUI.color = Color.white;

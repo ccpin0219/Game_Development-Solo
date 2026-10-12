@@ -13,6 +13,7 @@ public class DungeonBossSpecialAttacks : MonoBehaviour
     Vector3 origin, direction, laserDirection, laserAimPoint;
     Transform movingLeg;
     float elapsed, damageTimer;
+    public float Elapsed => elapsed;
     float lineCooldown=2.4f, circleCooldown, laserCooldown=5.6f;
     bool resolved;
     public void Initialize(DungeonBoss owner,DungeonArcher target)
@@ -129,7 +130,6 @@ public class DungeonBossSpecialAttacks : MonoBehaviour
         {
             float windup=ActivePattern=="Line"?1.2f:1.5f;
             marker.enabled=true;
-            if(movingLeg!=null)movingLeg.localRotation=Quaternion.Euler(-25*Mathf.Sin(Mathf.Clamp01(elapsed/windup)*Mathf.PI),0,0);
             if(elapsed>=windup && !resolved)
             {
                 resolved=true;

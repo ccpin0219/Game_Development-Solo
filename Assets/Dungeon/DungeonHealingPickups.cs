@@ -39,7 +39,7 @@ public class DungeonHealingPickups : MonoBehaviour
     }
     public void Simulate(float dt)
     {
-        if(!DungeonStartScreen.BattleStarted)return;
+        if(!DungeonStartScreen.BattleStarted || !DungeonExploration.ArenaReady)return;
         if (dt <= 0 || player == null || player.IsDead || (boss != null && boss.Defeated)) return;
         bool hadPickup = pickups.Count > 0;
         for (int i=pickups.Count-1;i>=0;i--)

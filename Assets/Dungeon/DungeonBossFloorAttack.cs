@@ -13,6 +13,7 @@ public class DungeonBossFloorAttack : MonoBehaviour
     Material[] original;
     Material warningMaterial, damageMaterial;
     float elapsed, cooldown=4.8f;
+    public float Elapsed => elapsed;
     bool hitPlayer;
     readonly int[,] tileColors=new int[12,18];
 

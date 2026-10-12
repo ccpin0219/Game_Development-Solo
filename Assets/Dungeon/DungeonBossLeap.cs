@@ -14,6 +14,7 @@ public class DungeonBossLeap : MonoBehaviour
     Material material, warningMaterial;
     Vector3 launch;
     float elapsed, cooldown=1.6f;
+    public float Elapsed => elapsed;
     bool landed;
     public void Initialize(DungeonBoss owner,DungeonArcher target)
     {

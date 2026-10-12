@@ -1,0 +1,95 @@
+// Edit-mode cosmetic upgrade. Geometry follows existing animated anchors.
+if(EditorApplication.isPlaying) return "Exit play mode first.";
+var boss=UnityEngine.Object.FindFirstObjectByType<DungeonBoss>();
+if(boss==null)return "Boss missing.";
+if(boss.GetComponentsInChildren<Transform>().Any(t=>t.name=="Ascendant Crown"))return "Already upgraded.";
+Undo.RegisterFullObjectHierarchyUndo(boss.gameObject,"Ascendant guardian armour");
+const string folder="Assets/Dungeon/Guardian/Ascendant";
+if(!AssetDatabase.IsValidFolder(folder))AssetDatabase.CreateFolder("Assets/Dungeon/Guardian","Ascendant");
+var block=AssetDatabase.LoadAssetAtPath<Mesh>("Assets/Dungeon/Guardian/Bevel Block.asset");
+var ringMesh=AssetDatabase.LoadAssetAtPath<Mesh>("Assets/Dungeon/Guardian/Socket Ring.asset");
+var stone=AssetDatabase.LoadAssetAtPath<Material>("Assets/Dungeon/Guardian/Weathered Ivory Basalt.mat");
+var dark=AssetDatabase.LoadAssetAtPath<Material>("Assets/Dungeon/Guardian/Deep Obsidian Joints.mat");
+var gold=AssetDatabase.LoadAssetAtPath<Material>("Assets/Dungeon/Guardian/Worn Guardian Bronze.mat");
+var edge=AssetDatabase.LoadAssetAtPath<Material>("Assets/Dungeon/Guardian/Carved Silver Stone.mat");
+var rune=AssetDatabase.LoadAssetAtPath<Material>("Assets/Dungeon/Guardian/Molten Guardian Inscriptions.mat");
+// A faceted tapered blade, pointing along local Y.
+var blade=new Mesh();blade.name="Tapered ceremonial stone";
+var pts=new[]{new Vector3(-.5f,0,-.35f),new Vector3(.5f,0,-.35f),new Vector3(.5f,0,.35f),new Vector3(-.5f,0,.35f),new Vector3(-.34f,.6f,-.23f),new Vector3(.34f,.6f,-.23f),new Vector3(.34f,.6f,.23f),new Vector3(-.34f,.6f,.23f),new Vector3(0,1,0)};
+var ids=new[]{0,2,1,0,3,2,0,1,5,0,5,4,1,2,6,1,6,5,2,3,7,2,7,6,3,0,4,3,4,7,4,5,8,5,6,8,6,7,8,7,4,8};
+var verts=ids.Select(i=>pts[i]).ToArray();blade.vertices=verts;blade.triangles=Enumerable.Range(0,verts.Length).ToArray();blade.RecalculateNormals();blade.RecalculateBounds();AssetDatabase.CreateAsset(blade,folder+"/Ceremonial Blade.asset");
+var groups=new System.Collections.Generic.List<Transform>();
+System.Func<Transform,string,Transform> group=(parent,name)=>{var g=new GameObject(name);g.transform.SetParent(parent,true);groups.Add(g.transform);return g.transform;};
+System.Func<string,Transform,Mesh,Vector3,Vector3,Material,Transform> shape=(name,parent,mesh,p,s,m)=>{var g=new GameObject(name);g.transform.SetParent(parent,false);g.transform.localPosition=p;g.transform.localScale=s;g.AddComponent<MeshFilter>().sharedMesh=mesh;g.AddComponent<MeshRenderer>().sharedMaterial=m;return g.transform;};
+System.Action<Transform,Vector3,Vector3,float,Material> bar=(g,a,b,w,m)=>{var t=shape("Inlaid trim",g,block,(a+b)*.5f,new Vector3(w,(b-a).magnitude,w),m);t.localRotation=Quaternion.FromToRotation(Vector3.up,b-a);};
+var anchors=boss.GetComponentsInChildren<Transform>();
+var head=anchors.First(t=>t.name=="Simple Head");var torso=anchors.First(t=>t.name=="Simple Body");
+var crown=group(head,"Ascendant Crown");
+foreach(float s in new[]{-1f,1f}){
+ var horn=shape("Swept crown horn",crown,blade,new Vector3(s*1.05f,14.1f,.35f),new Vector3(.85f,3.15f,1),dark);horn.localRotation=Quaternion.Euler(0,0,-s*28);
+ bar(crown,new Vector3(s*1.12f,14.35f,-.05f),new Vector3(s*2.15f,16.6f,-.05f),.12f,gold);
+ var cheek=shape("Long temple blade",crown,blade,new Vector3(s*1.4f,13.85f,-.25f),new Vector3(.6f,2.3f,.7f),edge);cheek.localRotation=Quaternion.Euler(0,0,s*168);
+ bar(crown,new Vector3(s*.8f,14.3f,-1.34f),new Vector3(s*1.42f,14.04f,-1.34f),.16f,gold);
+}
+shape("Royal spear crest",crown,blade,new Vector3(0,14.5f,.15f),new Vector3(.7f,2.8f,.85f),edge);
+bar(crown,new Vector3(0,14.75f,-.2f),new Vector3(0,16.85f,-.2f),.1f,rune);
+// Broken solar nimbus behind the head. Open center preserves the face.
+var back=group(torso,"Ascendant Solar Reliquary");
+for(int i=0;i<16;i++){
+ if(i==6||i==11)continue;
+ float a=i*Mathf.PI*2/16;float b=a+.27f;
+ Vector3 p=new Vector3(Mathf.Cos(a)*4.15f,12.4f+Mathf.Sin(a)*4.15f,2.1f);
+ Vector3 q=new Vector3(Mathf.Cos(b)*4.15f,12.4f+Mathf.Sin(b)*4.15f,2.1f);
+ bar(back,p,q,.3f,gold);
+ bar(back,p+Vector3.back*.2f,q+Vector3.back*.2f,.075f,rune);
+ if(i%2==0){var fin=shape("Nimbus ray",back,blade,p,new Vector3(.42f,1.05f,.5f),dark);fin.localRotation=Quaternion.Euler(0,0,a*Mathf.Rad2Deg-90);}
+}
+foreach(var anchor in anchors.Where(t=>t.name=="Simple Arm")){
+ float s=Mathf.Sign(anchor.position.x),x=anchor.position.x;
+ var g=group(anchor,"Ascendant Wing Pauldron");
+ for(int i=0;i<3;i++){
+  var fin=shape("Swept shoulder monolith",g,blade,new Vector3(x+s*(.2f+i*.65f),11.3f-i*.28f,.25f),new Vector3(1.3f,2.4f-i*.2f,2.6f),i==0?edge:stone);fin.localRotation=Quaternion.Euler(0,0,-s*(30+i*15));
+  bar(g,new Vector3(x+s*(.35f+i*.65f),11.55f-i*.28f,-.72f),new Vector3(x+s*(1.05f+i*.8f),12.65f-i*.45f,-.45f),.12f,gold);
+ }
+ for(int i=0;i<3;i++){
+  var plate=shape("Outer bracer scale",g,blade,new Vector3(x+s*1.05f,7.5f-i*.5f,.1f),new Vector3(.65f,1.2f,1.9f),dark);plate.localRotation=Quaternion.Euler(0,0,-s*105);
+ }
+}
+var chest=group(torso,"Ascendant Breastplate");
+foreach(float s in new[]{-1f,1f}){
+ bar(chest,new Vector3(s*.6f,11.65f,-1.8f),new Vector3(s*2.6f,10.92f,-1.8f),.27f,gold);
+ bar(chest,new Vector3(s*1.6f,10.45f,-1.8f),new Vector3(s*2.65f,10.85f,-1.8f),.11f,rune);
+ var t=shape("Flared hip armour",chest,blade,new Vector3(s*2.25f,6.9f,-.25f),new Vector3(1.45f,2.4f,2.5f),dark);t.localRotation=Quaternion.Euler(0,0,s*155);
+ for(int i=0;i<3;i++){
+  var tab=shape("Pointed ceremonial skirt",chest,blade,new Vector3(s*(.55f+i*.78f),6.5f,-1.65f),new Vector3(.67f,1.7f-i*.22f,.38f),i==0?gold:edge);tab.localRotation=Quaternion.Euler(0,0,180-s*i*8);
+ }
+}
+foreach(var anchor in anchors.Where(t=>t.name=="Simple Leg")){
+ var g=group(anchor,"Ascendant Greaves");float x=anchor.position.x,s=Mathf.Sign(x);
+ var knee=shape("Knee crest",g,blade,new Vector3(x,5.25f,-1.65f),new Vector3(.65f,1.1f,.42f),dark);
+ bar(g,new Vector3(x+s*.88f,1.6f,-1.25f),new Vector3(x+s*.88f,4.5f,-1.25f),.13f,gold);
+}
+var hammer=group(anchors.First(t=>t.name=="War Hammer Head"),"Ascendant Judgement Hammer");
+foreach(float s in new[]{-1f,1f}){
+ var cap=shape("Hammer flared buttress",hammer,blade,new Vector3(4.4f+s*1.65f,1.6f,-.7f),new Vector3(1.5f,1.5f,3.4f),dark);cap.localRotation=Quaternion.Euler(0,0,-s*90);
+ bar(hammer,new Vector3(4.4f+s*1.5f,.45f,-2.25f),new Vector3(4.4f+s*1.5f,2.7f,-2.25f),.16f,gold);
+}
+shape("Hammer outer seal",hammer,ringMesh,new Vector3(4.4f,1.6f,-3.47f),new Vector3(1.12f,1.12f,.8f),rune);
+// Batch by animated section/material and connect new emissive pieces to part damage feedback.
+var effect=boss.GetComponent<DungeonGuardianVisuals>();int count=0;
+foreach(var section in groups){
+ var filters=section.GetComponentsInChildren<MeshFilter>();
+ var glow=new System.Collections.Generic.List<Renderer>();
+ foreach(var bucket in filters.GroupBy(f=>f.GetComponent<Renderer>().sharedMaterial)){
+  var mesh=new Mesh();mesh.name=section.name+" "+bucket.Key.name;
+  mesh.CombineMeshes(bucket.Select(f=>new CombineInstance{mesh=f.sharedMesh,transform=section.worldToLocalMatrix*f.transform.localToWorldMatrix}).ToArray(),true,true);
+  AssetDatabase.CreateAsset(mesh,folder+"/Section"+(count++)+".asset");
+  var t=shape(bucket.Key.name,section,mesh,Vector3.zero,Vector3.one,bucket.Key);
+  if(bucket.Key==rune)glow.Add(t.GetComponent<Renderer>());
+ }
+ foreach(var f in filters)UnityEngine.Object.DestroyImmediate(f.gameObject);
+ var weak=section.parent.Find("Weak Point");
+ if(weak!=null && effect!=null){var pv=effect.parts.FirstOrDefault(v=>v.part==weak.GetComponent<DungeonBossPart>());if(pv!=null)pv.runes=pv.runes.Concat(glow).ToArray();}
+}
+EditorUtility.SetDirty(effect);AssetDatabase.SaveAssets();UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(boss.gameObject.scene);SceneView.RepaintAll();
+return "Ascendant guardian created: "+count+" batched meshes; colliders="+boss.GetComponentsInChildren<Collider>().Length;

@@ -69,7 +69,7 @@ public class DungeonFlameTraps : MonoBehaviour
     }
     public void Simulate(float dt)
     {
-        if(!DungeonStartScreen.BattleStarted)return;
+        if(!DungeonStartScreen.BattleStarted || !DungeonExploration.ArenaReady)return;
         if (torches.Count==0 || player==null || player.IsDead || (boss!=null && boss.Defeated)) return;
         // Existing shots keep flying independently when the next torch starts charging.
         for(int i=projectiles.Count-1;i>=0;i--)

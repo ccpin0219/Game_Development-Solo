@@ -1,0 +1,59 @@
+if(EditorApplication.isPlaying)return "Stop play first.";
+var root=GameObject.Find("Fixed Sanctum Dungeon").transform;
+if(root.Find("Vault Details")!=null)return "Already polished.";
+const string folder="Assets/Dungeon/FixedDungeon";
+var detail=new GameObject("Vault Details").transform;detail.SetParent(root);
+var block=AssetDatabase.LoadAssetAtPath<Mesh>("Assets/Dungeon/Guardian/Bevel Block.asset");
+var dark=AssetDatabase.LoadAssetAtPath<Material>("Assets/Dungeon/Sanctum/Recessed Basalt.mat");
+var edge=AssetDatabase.LoadAssetAtPath<Material>("Assets/Dungeon/Sanctum/Pale Carved Edges.mat");
+var bronze=AssetDatabase.LoadAssetAtPath<Material>("Assets/Dungeon/Sanctum/Antique Brass Inlay.mat");
+var texture=new Texture2D(128,128,TextureFormat.RGB24,true);texture.name="Weathered stone pores";texture.wrapMode=TextureWrapMode.Repeat;
+var pixels=new Color[128*128];
+for(int y=0;y<128;y++)for(int x=0;x<128;x++){
+ float coarse=Mathf.PerlinNoise(x*.07f,y*.07f),fine=Mathf.PerlinNoise(x*.65f+23,y*.65f+71);
+ float c=.63f+coarse*.24f+fine*.12f;
+ if(fine<.27f)c*=.65f;
+ pixels[y*128+x]=new Color(c,c,c);
+}
+texture.SetPixels(pixels);texture.Apply();AssetDatabase.CreateAsset(texture,folder+"/Stone Pores.asset");
+var replacements=new System.Collections.Generic.Dictionary<Material,Material>();
+foreach(var r in root.GetComponentsInChildren<MeshRenderer>()){
+ var m=r.sharedMaterial;if(m==null)continue;
+ if(m.name!="Blue Grey Limestone"&&m.name!="Pale Carved Edges"&&m.name!="Worn flagstone"&&m.name!="Cool flagstone")continue;
+ if(!replacements.ContainsKey(m)){
+  var clone=new Material(m);clone.name="Weathered "+m.name;clone.SetTexture("_BaseMap",texture);clone.SetTextureScale("_BaseMap",new Vector2(3,3));clone.SetFloat("_Smoothness",.14f);AssetDatabase.CreateAsset(clone,folder+"/"+clone.name+".mat");replacements[m]=clone;
+ }
+ r.sharedMaterial=replacements[m];
+}
+System.Func<string,Vector3,Vector3,Material,Transform> box=(name,p,s,m)=>{var g=new GameObject(name);g.transform.SetParent(detail);g.transform.position=p;g.transform.localScale=s;g.isStatic=true;g.AddComponent<MeshFilter>().sharedMesh=block;g.AddComponent<MeshRenderer>().sharedMaterial=m;return g.transform;};
+// Cross beams, coffers and suspension details bring overhead depth down to eye level.
+foreach(float z in new[]{-213f,-205f,-197f}){
+ box("Entrance ceiling rib",new Vector3(0,8.6f,z),new Vector3(15.7f,.6f,.7f),edge);
+ foreach(float x in new[]{-5f,0f,5f})box("Entrance coffer rail",new Vector3(x,8.65f,-204),new Vector3(.3f,.45f,23),dark);
+}
+foreach(float z in new[]{-176f,-168f,-160f}){
+ box("Nave ceiling beam",new Vector3(0,12.4f,z),new Vector3(23.7f,.8f,.8f),edge);
+ foreach(float x in new[]{-8f,0f,8f})box("Nave overhead rib",new Vector3(x,12.45f,-168),new Vector3(.55f,.8f,24),dark);
+}
+foreach(float z in new[]{-189f,-181f,-149f,-141f,-133f,-97f,-73f,-65f,-59f})box("Corridor timberstone beam",new Vector3(0,6.6f,z),new Vector3(7.8f,.6f,.65f),edge);
+foreach(float z in new[]{-121f,-113f,-105f})box("Crossroads ceiling beam",new Vector3(0,10.5f,z),new Vector3(23.7f,.7f,.65f),edge);
+// Hanging votive chandelier in the nave, kept well above the walkable fountain rim.
+for(int i=0;i<12;i++){
+ float a=i*Mathf.PI/6,b=(i+1)*Mathf.PI/6;
+ var p=new Vector3(Mathf.Cos(a)*3,7,-168+Mathf.Sin(a)*3);var q=new Vector3(Mathf.Cos(b)*3,7,-168+Mathf.Sin(b)*3);
+ var t=box("Votive ring",(p+q)*.5f,new Vector3(.12f,Vector3.Distance(p,q),.12f),bronze);t.rotation=Quaternion.FromToRotation(Vector3.up,q-p);
+ if(i%3==0){box("Suspension chain",p+Vector3.up*2.5f,new Vector3(.065f,5,.065f),dark);box("Votive candle",p+Vector3.up*.23f,new Vector3(.16f,.5f,.16f),edge);}
+}
+// Shadow-casting anchors only in key chambers, keeping corridor lights inexpensive.
+var lights=root.GetComponentsInChildren<Light>().Where(l=>l.name=="Local chamber light").ToArray();
+foreach(var target in new[]{new Vector3(0,4,-168),new Vector3(34,5,-114),new Vector3(-36,3,-135),new Vector3(5,3,-196)}){
+ var l=lights.OrderBy(v=>Vector3.Distance(v.transform.position,target)).First();l.shadows=LightShadows.Soft;l.shadowStrength=.85f;l.shadowBias=.04f;
+}
+// Bake static detail meshes together by material; keep them separate from dynamic props.
+foreach(var batch in detail.GetComponentsInChildren<MeshFilter>().GroupBy(f=>f.GetComponent<Renderer>().sharedMaterial)){
+ var mesh=new Mesh();mesh.indexFormat=UnityEngine.Rendering.IndexFormat.UInt32;mesh.CombineMeshes(batch.Select(f=>new CombineInstance{mesh=f.sharedMesh,transform=f.transform.localToWorldMatrix}).ToArray(),true,true);AssetDatabase.CreateAsset(mesh,folder+"/Vault "+batch.Key.name+".asset");
+ var obj=new GameObject("Combined "+batch.Key.name);obj.transform.SetParent(detail);obj.AddComponent<MeshFilter>().sharedMesh=mesh;obj.AddComponent<MeshRenderer>().sharedMaterial=batch.Key;
+ foreach(var f in batch)UnityEngine.Object.DestroyImmediate(f.gameObject);
+}
+AssetDatabase.SaveAssets();UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(root.gameObject.scene);UnityEditor.SceneManagement.EditorSceneManager.SaveScene(root.gameObject.scene);
+return "Vault, material grain and chamber shadows saved.";

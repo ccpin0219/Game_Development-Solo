@@ -16,6 +16,7 @@ public class DungeonRockVolley : MonoBehaviour
     DungeonArcher player;
     Material warningMaterial;
     float elapsed;
+    public float Elapsed => elapsed;
     public int RockCount => rocks.Count;
     public int ImpactCount { get; private set; }
     public bool Finished => elapsed >= .6f + Mathf.Max(0, rocks.Count - 1) * .11f + FlightTime + .7f;
