@@ -38,7 +38,7 @@ public static class DungeonEncounterBuilder
         EditorSceneManager.MarkSceneDirty(root.gameObject.scene);
         EditorSceneManager.SaveScene(root.gameObject.scene);
     }
-    static DungeonRoomEncounter Room(Transform root, string name, Vector3 center, Vector3 size)
+    public static DungeonRoomEncounter Room(Transform root, string name, Vector3 center, Vector3 size)
     {
         var room = new GameObject(name).AddComponent<DungeonRoomEncounter>();
         room.transform.SetParent(root, false);
@@ -46,7 +46,7 @@ public static class DungeonEncounterBuilder
         room.enemies = new DungeonSkeleton[0];
         return room;
     }
-    static void Enemies(DungeonRoomEncounter room, GameObject prefab, params Vector3[] points)
+    public static void Enemies(DungeonRoomEncounter room, GameObject prefab, params Vector3[] points)
     {
         room.enemies = new DungeonSkeleton[points.Length];
         for (int i = 0; i < points.Length; i++)
@@ -59,7 +59,7 @@ public static class DungeonEncounterBuilder
         }
     }
     // A portal's y component stores its yaw; the doorway itself is at floor height.
-    static void Doors(DungeonRoomEncounter room, params Vector3[] portals)
+    public static void Doors(DungeonRoomEncounter room, params Vector3[] portals)
     {
         var leaves = new List<Transform>(); var blockers = new List<Collider>();
         var iron = AssetDatabase.LoadAssetAtPath<Material>("Assets/Dungeon/Sanctum/Recessed Basalt.mat");

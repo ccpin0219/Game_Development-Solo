@@ -7,11 +7,18 @@ public class DungeonStartScreen : MonoBehaviour
 {
     public static bool BattleStarted { get; private set; }
     public static bool BattleEnded { get; private set; }
+    public static bool IsPaused { get; private set; }
+    public static float RevivalPenalty { get; private set; }
+    public static int DeathCount { get; private set; }
+    DungeonLeaderboard leaderboard;
+    string rankingName="", rankingMessage="";
+    bool scoreSubmitted;
+    Vector2 rankingScroll;
     bool restarting;
     DungeonArcher player;
     Camera gameplayCamera, menuCamera;
     Font menuFont;
-    bool cameraWasEnabled, showControls;
+    bool cameraWasEnabled, showRanking;
     DungeonBoss boss;
     Texture2D menuBackground;
     Font titleFont;
@@ -24,6 +31,11 @@ public class DungeonStartScreen : MonoBehaviour
     {
         BattleStarted=false;
         BattleEnded=false;
+        IsPaused=false;
+        RevivalPenalty=0;
+        DeathCount=0;
+        leaderboard=new DungeonLeaderboard();
+        Time.timeScale=1f;
         menuFont=Resources.Load<Font>("Fonts/NeoDunggeunmo");
         if(menuFont==null){menuFont=Font.CreateDynamicFontFromOSFont("Malgun Gothic",16);ownsFont=true;}
         titleFont=menuFont;
@@ -49,28 +61,72 @@ public class DungeonStartScreen : MonoBehaviour
         {
             var keys=Keyboard.current;
             if(keys==null)return;
-            if(showControls){if(keys.escapeKey.wasPressedThisFrame)showControls=false;return;}
+            if(showRanking){if(keys.escapeKey.wasPressedThisFrame)showRanking=false;return;}
             if(keys.downArrowKey.wasPressedThisFrame || keys.sKey.wasPressedThisFrame)selected=(selected+1)%3;
             if(keys.upArrowKey.wasPressedThisFrame || keys.wKey.wasPressedThisFrame)selected=(selected+2)%3;
             if(keys.enterKey.wasPressedThisFrame)
             {
-                if(selected==0)StartBattle();else if(selected==1)ToggleControls();else QuitGame();
+                if(selected==0)StartBattle();else if(selected==1)ToggleRanking();else QuitGame();
             }
             return;
         }
         if(!BattleEnded && ((player!=null && player.IsDead) || (boss!=null && boss.gameObject.activeInHierarchy && boss.Defeated)))
+        {
             BattleEnded=true;
-        if(!BattleEnded)return;
+            IsPaused=false;
+            if(player!=null && player.IsDead){DeathCount++;Time.timeScale=0f;}
+        }
+        if(!BattleEnded)
+        {
+            if(Keyboard.current!=null && Keyboard.current.escapeKey.wasPressedThisFrame)
+            {
+                if(IsPaused)ResumeBattle();else PauseBattle();
+            }
+            return;
+        }
         Cursor.lockState=CursorLockMode.None;Cursor.visible=true;
     }
     public void RestartBattle()
     {
-        if(!BattleEnded || restarting)return;
+        if((!BattleEnded && !IsPaused) || restarting)return;
         restarting=true;
         Time.timeScale=1f;
         SceneManager.LoadScene(SceneManager.GetActiveScene().path);
     }
-    public void ToggleControls() { showControls=!showControls; }
+    public void ToggleRanking() { showRanking=!showRanking; }
+    public bool SubmitRanking(string name)
+    {
+        if(!BattleEnded || boss==null || !boss.ClearRecorded || scoreSubmitted || restarting)return false;
+        if(!leaderboard.Add(name,boss.BattleTime,DeathCount))
+        { rankingMessage="이름을 입력해 주세요.";return false; }
+        scoreSubmitted=true;
+        rankingMessage="기록이 랭킹에 등록되었습니다.";
+        return true;
+    }
+    public void PauseBattle()
+    {
+        if(!BattleStarted || BattleEnded || IsPaused || restarting)return;
+        IsPaused=true;
+        Time.timeScale=0f;
+        Cursor.lockState=CursorLockMode.None;Cursor.visible=true;
+    }
+    public void ResumeBattle()
+    {
+        if(!IsPaused || BattleEnded || restarting)return;
+        IsPaused=false;
+        Time.timeScale=1f;
+        Cursor.lockState=CursorLockMode.Locked;Cursor.visible=false;
+    }
+    public bool ReviveBattle()
+    {
+        if(!BattleEnded || restarting || player==null || !player.IsDead || (boss!=null && boss.ClearRecorded))return false;
+        if(!player.Revive())return false;
+        RevivalPenalty+=90f;
+        BattleEnded=false;
+        Time.timeScale=1f;
+        Cursor.lockState=CursorLockMode.Locked;Cursor.visible=false;
+        return true;
+    }
     public void QuitGame()
     {
 #if UNITY_EDITOR
@@ -83,6 +139,7 @@ public class DungeonStartScreen : MonoBehaviour
     {
         if(BattleStarted)return;
         BattleStarted=true;
+        if(DungeonExploration.Instance!=null)DungeonExploration.Instance.BeginRun();
         if(menuCamera!=null){menuCamera.enabled=false;Destroy(menuCamera.gameObject);}
         if(gameplayCamera!=null)gameplayCamera.enabled=cameraWasEnabled;
         Cursor.lockState=CursorLockMode.Locked;Cursor.visible=false;
@@ -94,7 +151,7 @@ public class DungeonStartScreen : MonoBehaviour
     }
     void OnGUI()
     {
-        if(BattleStarted){if(BattleEnded)DrawResult();return;}
+        if(BattleStarted){if(BattleEnded)DrawResult();else if(IsPaused)DrawPause();return;}
         GUI.depth=-100;
         var oldMatrix=GUI.matrix;
         var oldColor=GUI.color;
@@ -117,9 +174,9 @@ public class DungeonStartScreen : MonoBehaviour
         Fill(new Rect(98,282,28,2),Gold);
         GUI.Label(new Rect(142,269,300,32),"돌의 수호자",smallStyle);
         bool previousEnabled=GUI.enabled;
-        GUI.enabled=!showControls;
+        GUI.enabled=!showRanking;
         if(MenuButton(new Rect(96,374,340,52),"탐험 시작",selected==0,0))StartBattle();
-        if(MenuButton(new Rect(96,438,340,52),"조작법",selected==1,1))ToggleControls();
+        if(MenuButton(new Rect(96,438,340,52),"랭킹",selected==1,1))ToggleRanking();
         if(MenuButton(new Rect(96,502,340,52),"나가기",selected==2,2))QuitGame();
         GUI.enabled=previousEnabled;
         GUI.Label(new Rect(98,605,400,28),"BEST  /  "+(boss==null || boss.BestClearTime<0?"--:--.--":DungeonBoss.FormatTime(boss.BestClearTime)),smallStyle);
@@ -133,7 +190,7 @@ public class DungeonStartScreen : MonoBehaviour
             float alpha=(.18f+.25f*Mathf.Sin(i+t*.8f))*Mathf.Clamp01(y/100);
             Fill(new Rect(Mathf.Floor(x/4)*4,Mathf.Floor(y/4)*4,4,4),new Color(1,.52f,.2f,Mathf.Max(0,alpha)));
         }
-        if(showControls)DrawControls();
+        if(showRanking)DrawRanking();
         GUI.matrix=oldMatrix;GUI.color=oldColor;
     }
     void EnsureStyles()
@@ -169,21 +226,52 @@ public class DungeonStartScreen : MonoBehaviour
         GUI.Label(rect,label,menuButtonStyle);
         return GUI.Button(rect,GUIContent.none,GUIStyle.none);
     }
-    void DrawControls()
+    void DrawRanking()
     {
         Fill(new Rect(0,0,1280,720),new Color(0,0,0,.78f));
-        Fill(new Rect(352,112,576,496),new Color(.045f,.07f,.085f,1));
-        Fill(new Rect(392,146,32,2),Gold);
-        GUI.Label(new Rect(392,170,450,40),"조작법",new GUIStyle(bodyStyle){fontSize=32});
-        string[] keys={"W A S D","마우스","SPACE","좌클릭 유지 / 놓기","우클릭","TAB","ESC","E"};
-        string[] actions={"이동","주변 둘러보기","점프","활 충전 / 발사","충전 취소","강공 / 속공 전환","일시정지 · 클릭하여 복귀","가까운 봉인 장치 작동"};
-        for(int i=0;i<keys.Length;i++)
+        Fill(new Rect(260,80,760,560),new Color(.045f,.07f,.085f,1));
+        Fill(new Rect(300,112,32,2),Gold);
+        GUI.Label(new Rect(300,130,400,46),"성소의 기록 · 랭킹",new GUIStyle(bodyStyle){fontSize=32});
+        GUI.Label(new Rect(300,183,680,28),"클리어 시간순 · 부활 페널티 포함 · 이 PC에 저장",bodyStyle);
+        GUI.Label(new Rect(308,228,70,30),"순위",bodyStyle);
+        GUI.Label(new Rect(400,228,260,30),"이름",bodyStyle);
+        GUI.Label(new Rect(684,228,165,30),"클리어 타임",bodyStyle);
+        GUI.Label(new Rect(860,228,110,30),"사망 횟수",bodyStyle);
+        Fill(new Rect(300,265,680,1),Gold);
+        var entries=leaderboard.Entries;
+        var rowStyle=new GUIStyle(bodyStyle){richText=false};
+        rankingScroll=GUI.BeginScrollView(new Rect(300,278,680,270),rankingScroll,new Rect(0,0,650,Mathf.Max(270,entries.Count*40)));
+        if(entries.Count==0)GUI.Label(new Rect(8,65,640,40),"아직 기록이 없습니다. 첫 번째 클리어를 남겨보세요.",rowStyle);
+        for(int i=0;i<entries.Count;i++)
         {
-            float y=222+i*36;
-            GUI.Label(new Rect(414,y,215,32),keys[i],bodyStyle);
-            GUI.Label(new Rect(638,y,252,32),actions[i],new GUIStyle(bodyStyle){fontSize=16});
+            var entry=entries[i];float y=i*40;
+            if(i%2==0)Fill(new Rect(0,y,650,38),new Color(1,1,1,.035f));
+            GUI.Label(new Rect(8,y+6,70,28),leaderboard.RankAt(i).ToString(),rowStyle);
+            GUI.Label(new Rect(100,y+6,275,28),entry.playerName,rowStyle);
+            GUI.Label(new Rect(384,y+6,165,28),DungeonBoss.FormatTime(entry.seconds),rowStyle);
+            GUI.Label(new Rect(560,y+6,85,28),entry.deaths+"회",rowStyle);
         }
-        if(MenuButton(new Rect(406,528,450,44),"돌아가기",true))showControls=false;
+        GUI.EndScrollView();
+        if(MenuButton(new Rect(300,572,350,44),"돌아가기",true))showRanking=false;
+    }
+    void DrawPause()
+    {
+        GUI.depth=-100;
+        var oldMatrix=GUI.matrix;
+        var oldColor=GUI.color;
+        GUI.matrix=Matrix4x4.TRS(Vector3.zero,Quaternion.identity,new Vector3(Screen.width/1280f,Screen.height/720f,1));
+        GUI.color=Color.white;
+        Fill(new Rect(0,0,1280,720),new Color(0,0,0,.45f));
+        Fill(new Rect(400,220,480,300),new Color(.025f,.035f,.045f,.96f));
+        var title=new GUIStyle(GUI.skin.label){alignment=TextAnchor.MiddleCenter,fontSize=32,font=menuFont};
+        var text=new GUIStyle(GUI.skin.label){alignment=TextAnchor.MiddleCenter,fontSize=16,font=menuFont};
+        var button=new GUIStyle(GUI.skin.button){fontSize=25,fontStyle=FontStyle.Bold,font=menuFont};
+        GUI.Label(new Rect(420,248,440,50),"일시정지",title);
+        GUI.Label(new Rect(420,310,440,40),"잠시 숨을 고르세요.",text);
+        if(GUI.Button(new Rect(420,380,210,60),"다시하기",button))RestartBattle();
+        if(GUI.Button(new Rect(650,380,210,60),"계속하기",button))ResumeBattle();
+        GUI.Label(new Rect(420,456,440,30),"다시하기는 시작 화면으로 · ESC로 계속하기",text);
+        GUI.matrix=oldMatrix;GUI.color=oldColor;
     }
     void DrawResult()
     {
@@ -192,15 +280,34 @@ public class DungeonStartScreen : MonoBehaviour
         var oldColor=GUI.color;
         GUI.matrix=Matrix4x4.TRS(Vector3.zero,Quaternion.identity,new Vector3(Screen.width/1280f,Screen.height/720f,1));
         GUI.color=new Color(.025f,.035f,.045f,.94f);
-        GUI.DrawTexture(new Rect(400,220,480,300),Texture2D.whiteTexture);
-        GUI.color=Color.white;
         bool cleared=boss!=null && boss.ClearRecorded;
+        GUI.DrawTexture(new Rect(400,220,480,cleared?420:300),Texture2D.whiteTexture);
+        GUI.color=Color.white;
         var title=new GUIStyle(GUI.skin.label){alignment=TextAnchor.MiddleCenter,fontSize=32,fontStyle=FontStyle.Normal,font=menuFont};
         var text=new GUIStyle(GUI.skin.label){alignment=TextAnchor.MiddleCenter,fontSize=16,font=menuFont};
         GUI.Label(new Rect(420,248,440,50),cleared?"보스 처치 완료":"게임 오버",title);
-        GUI.Label(new Rect(420,310,440,40),cleared?"클리어 시간  "+DungeonBoss.FormatTime(boss.BattleTime):"다시 도전해 보세요.",text);
+        GUI.Label(new Rect(420,310,440,40),cleared?"클리어 시간  "+DungeonBoss.FormatTime(boss.BattleTime):"현재 위치에서 부활 · 기록 +1분 30초",text);
         var button=new GUIStyle(GUI.skin.button){fontSize=25,fontStyle=FontStyle.Bold,font=menuFont};
-        if(GUI.Button(new Rect(490,380,300,60),"다시 하기",button))RestartBattle();
+        if(cleared)
+        {
+            GUI.Label(new Rect(420,350,440,28),"사망 횟수  "+DeathCount+"회",text);
+            GUI.Label(new Rect(420,390,90,36),"이름",text);
+            var input=new GUIStyle(GUI.skin.textField){font=menuFont,fontSize=22,alignment=TextAnchor.MiddleLeft,richText=false};
+            bool wasEnabled=GUI.enabled;
+            GUI.enabled=!scoreSubmitted;
+            rankingName=GUI.TextField(new Rect(520,390,330,40),rankingName,16,input);
+            if(GUI.Button(new Rect(420,456,210,56),scoreSubmitted?"등록 완료":"기록 등록",button))SubmitRanking(rankingName);
+            GUI.enabled=wasEnabled;
+            if(GUI.Button(new Rect(650,456,210,56),"시작 화면",button))RestartBattle();
+            GUI.Label(new Rect(420,530,440,32),rankingMessage,text);
+            GUI.Label(new Rect(420,574,440,32),"이름은 최대 16자 · 등록 후 시작 화면으로 이동",text);
+        }
+        else
+        {
+            if(GUI.Button(new Rect(420,380,210,60),"다시하기",button))RestartBattle();
+            if(GUI.Button(new Rect(650,380,210,60),"부활하기",button))ReviveBattle();
+            GUI.Label(new Rect(420,456,440,30),"다시하기를 선택하면 시작 화면으로 돌아갑니다.",text);
+        }
         GUI.matrix=oldMatrix;GUI.color=oldColor;
     }
 }

@@ -19,6 +19,19 @@ public class DungeonArcher : MonoBehaviour
     public float CurrentMaxDamage => Mode == AttackMode.Heavy ? heavyDamage : rapidDamage;
     public float CurrentReloadSeconds => Mode == AttackMode.Heavy ? heavyReloadSeconds : rapidReloadSeconds;
     public float Charge { get; private set; }
+    public const float AutoChargeDuration = 5f, AutoChargeCooldownSeconds = 30f;
+    public float AutoChargeRemaining { get; private set; }
+    public float AutoChargeCooldownRemaining { get; private set; }
+    public bool AutoChargeActive => AutoChargeRemaining>0;
+    public float EffectiveChargeSeconds => AutoChargeActive ? (Mode==AttackMode.Heavy?.4f:.12f) : CurrentChargeSeconds;
+    public bool TryAutoCharge()
+    {
+        if(!DungeonStartScreen.BattleStarted || DungeonStartScreen.BattleEnded || DungeonStartScreen.IsPaused ||
+            IsDead || AutoChargeCooldownRemaining>0)return false;
+        AutoChargeRemaining=AutoChargeDuration;
+        AutoChargeCooldownRemaining=AutoChargeCooldownSeconds;
+        return true;
+    }
     // Rapid keeps the player mobile; committing to a heavy charge carries a movement cost.
     public float CurrentMoveSpeed => !drawing ? moveSpeed : moveSpeed *
         (Mode == AttackMode.Rapid ? Mathf.Lerp(.95f, .9f, Charge) : Mathf.Lerp(.65f, .2f, Charge));
@@ -27,6 +40,90 @@ public class DungeonArcher : MonoBehaviour
     public int HitsTaken { get; private set; }
     public int RemainingHits => MaxHits - HitsTaken;
     public bool IsDead => RemainingHits <= 0;
+    public const float DashCooldownSeconds = 15f;
+    const float DashDistance = 6f, DashDuration = .2f;
+    public float DashCooldownRemaining { get; private set; }
+    public bool IsDashing => dashRemaining > 0;
+    float dashRemaining;
+    Vector3 dashDirection;
+    float dashFxAge, dashFxStrength, dashBaseFov;
+    bool dashFxActive;
+
+    void ResetDashFeedback()
+    {
+        if(dashFxActive && view!=null)view.fieldOfView=dashBaseFov;
+        dashFxActive=false;dashFxStrength=0;
+    }
+    void LateUpdate()
+    {
+        if(!dashFxActive)return;
+        if(IsDead || DungeonStartScreen.BattleEnded || DungeonStartScreen.IsPaused ||
+            Cursor.lockState!=CursorLockMode.Locked){ResetDashFeedback();return;}
+        dashFxAge+=Time.deltaTime;
+        // Brief acceleration followed by a soft release; no camera shake or blur.
+        dashFxStrength=Mathf.SmoothStep(0,1,dashFxAge/.04f)*
+            (1-Mathf.SmoothStep(0,1,(dashFxAge-.16f)/.22f));
+        if(view!=null)view.fieldOfView=dashBaseFov+4f*dashFxStrength;
+        if(dashFxAge>=.38f)ResetDashFeedback();
+    }
+
+    void DrawDashFeedback()
+    {
+        if(dashFxStrength<=0 || DungeonStartScreen.IsPaused || DungeonStartScreen.BattleEnded || IsDead)return;
+        var oldColor=GUI.color;var oldMatrix=GUI.matrix;
+        Vector2 center=new Vector2(Screen.width*.5f,Screen.height*.5f);
+        float scale=Mathf.Max(.65f,Screen.height/720f);
+        for(int i=0;i<20;i++)
+        {
+            float angle=(i*18f+7)*Mathf.Deg2Rad;
+            Vector2 ray=new Vector2(Mathf.Cos(angle)*Screen.width*.5f,Mathf.Sin(angle)*Screen.height*.5f);
+            // Start in the outer 18% of the viewport; keep the aiming area clear.
+            ray/=Mathf.Max(Mathf.Abs(Mathf.Cos(angle)),Mathf.Abs(Mathf.Sin(angle)));
+            float travel=Mathf.Repeat(dashFxAge*2.5f+i*.137f,1);
+            Vector2 start=center+ray*(.82f+travel*.12f);
+            float length=(18+i%4*8)*scale;
+            GUI.matrix=oldMatrix;
+            GUIUtility.RotateAroundPivot(Mathf.Atan2(ray.y,ray.x)*Mathf.Rad2Deg,start);
+            for(int segment=0;segment<3;segment++)
+            {
+                GUI.color=new Color(.68f,.85f,1f,dashFxStrength*(.06f+segment*.055f));
+                GUI.DrawTexture(new Rect(start.x+segment*length/3,start.y,length/3,scale*(i%3==0?2:1)),Texture2D.whiteTexture);
+            }
+        }
+        GUI.matrix=oldMatrix;GUI.color=oldColor;
+    }
+
+    public bool TryDash(Vector2 direction)
+    {
+        if(!DungeonStartScreen.BattleStarted || DungeonStartScreen.BattleEnded ||
+            DungeonStartScreen.IsPaused || IsDead || IsDashing || DashCooldownRemaining>0)return false;
+        if(direction.sqrMagnitude<.001f)direction=Vector2.up;
+        direction.Normalize();
+        dashDirection=(transform.right*direction.x+transform.forward*direction.y).normalized;
+        dashRemaining=DashDuration;
+        DashCooldownRemaining=DashCooldownSeconds;
+        ResetDashFeedback();
+        dashBaseFov=view!=null?view.fieldOfView:60;
+        dashFxAge=0;dashFxActive=true;
+        return true;
+    }
+    // Returns the part of this frame occupied by the dash, so normal movement is not added twice.
+    public float AdvanceDash(float dt)
+    {
+        if(dt<=0 || !DungeonStartScreen.BattleStarted || DungeonStartScreen.BattleEnded ||
+            DungeonStartScreen.IsPaused || IsDead)return 0;
+        DashCooldownRemaining=Mathf.Max(0,DashCooldownRemaining-dt);
+        float used=Mathf.Min(dt,dashRemaining);
+        float distance=used*(DashDistance/DashDuration);
+        while(distance>0)
+        {
+            float step=Mathf.Min(.25f,distance);
+            controller.Move(dashDirection*step);
+            distance-=step;
+        }
+        dashRemaining=Mathf.Max(0,dashRemaining-used);
+        return used;
+    }
     float damageFlash, healFlash;
     const float HitMarkerPulseSeconds = .11f;
     int pendingHitMarkers;
@@ -70,7 +167,7 @@ public class DungeonArcher : MonoBehaviour
     }
     void Start() { if(DungeonStartScreen.BattleStarted)LockCursor(); }
     void LockCursor() { Cursor.lockState = CursorLockMode.Locked; Cursor.visible = false; }
-    void OnDisable() { CancelDraw(); Cursor.lockState = CursorLockMode.None; Cursor.visible = true; }
+    void OnDisable() { ResetDashFeedback();CancelDraw(); Cursor.lockState = CursorLockMode.None; Cursor.visible = true; }
     void OnApplicationFocus(bool focus) { if (!focus) CancelDraw(); }
     void CancelDraw()
     {
@@ -90,9 +187,23 @@ public class DungeonArcher : MonoBehaviour
         drawing = true;
         return true;
     }
-    public void AdvanceCharge(float dt)
+    public void AdvanceCharge(float dt, bool allowCharge = true, bool manualHeld = false)
     {
-        if (drawing && dt > 0) Charge = Mathf.Clamp01(Charge + dt / CurrentChargeSeconds);
+        if(dt<=0 || IsDead || !DungeonStartScreen.BattleStarted || DungeonStartScreen.BattleEnded || DungeonStartScreen.IsPaused)return;
+        bool wasAutomatic=AutoChargeActive;
+        float automaticTime=Mathf.Min(dt,AutoChargeRemaining);
+        if(allowCharge)
+        {
+            if(wasAutomatic && !drawing && cooldown<=0)BeginDraw();
+            if(drawing)
+            {
+                float gain=automaticTime/(Mode==AttackMode.Heavy?.4f:.12f)+(dt-automaticTime)/CurrentChargeSeconds;
+                Charge=Mathf.Clamp01(Charge+gain);
+            }
+        }
+        AutoChargeRemaining=Mathf.Max(0,AutoChargeRemaining-dt);
+        AutoChargeCooldownRemaining=Mathf.Max(0,AutoChargeCooldownRemaining-dt);
+        if(wasAutomatic && !AutoChargeActive && !manualHeld)CancelDraw();
     }
 
     public void TakeDamage(float damage)
@@ -101,6 +212,14 @@ public class DungeonArcher : MonoBehaviour
         HitsTaken = Mathf.Min(MaxHits, HitsTaken + 1);
         damageFlash = .3f;
         if (IsDead) { CancelDraw(); Cursor.lockState = CursorLockMode.None; Cursor.visible = true; }
+    }
+
+    public bool Revive()
+    {
+        if(!IsDead)return false;
+        HitsTaken=0;
+        damageFlash=0;healFlash=.4f;
+        return true;
     }
 
     public bool Heal(int hits = 1)
@@ -115,16 +234,12 @@ public class DungeonArcher : MonoBehaviour
     {
         if(!DungeonStartScreen.BattleStarted)return;
         AdvanceHitMarkers(Time.unscaledDeltaTime);
-        if(DungeonStartScreen.BattleEnded){CancelDraw();return;}
+        if(DungeonStartScreen.BattleEnded || DungeonStartScreen.IsPaused){CancelDraw();return;}
         var mouse = Mouse.current; var keys = Keyboard.current;
         if (mouse == null || keys == null) return;
         damageFlash = Mathf.Max(0, damageFlash - Time.deltaTime);
         healFlash = Mathf.Max(0, healFlash - Time.deltaTime);
         if (IsDead)return;
-        if (keys.escapeKey.wasPressedThisFrame)
-        {
-            Cursor.lockState = CursorLockMode.None; Cursor.visible = true; CancelDraw();
-        }
         if (Cursor.lockState != CursorLockMode.Locked)
         {
             if (mouse.leftButton.wasPressedThisFrame) LockCursor();
@@ -139,28 +254,39 @@ public class DungeonArcher : MonoBehaviour
         Vector2 input = new Vector2((keys.dKey.isPressed ? 1 : 0) - (keys.aKey.isPressed ? 1 : 0),
             (keys.wKey.isPressed ? 1 : 0) - (keys.sKey.isPressed ? 1 : 0));
         input = Vector2.ClampMagnitude(input, 1);
+        if(keys.leftShiftKey.wasPressedThisFrame || keys.rightShiftKey.wasPressedThisFrame)
+            TryDash(new Vector2((keys.rightArrowKey.isPressed?1:0)-(keys.leftArrowKey.isPressed?1:0),
+                (keys.upArrowKey.isPressed?1:0)-(keys.downArrowKey.isPressed?1:0)));
+        float dashTime=AdvanceDash(Time.deltaTime);
         if (controller.isGrounded && verticalSpeed < 0) verticalSpeed = -2;
         if (controller.isGrounded && keys.spaceKey.wasPressedThisFrame) verticalSpeed = 6;
         verticalSpeed -= 20 * Time.deltaTime;
         cooldown = Mathf.Max(0, cooldown - Time.deltaTime);
+        if(keys.qKey.wasPressedThisFrame)TryAutoCharge();
         bool releaseAfterMovement = false;
+        bool chargeCancelled=false;
         if (keys.tabKey.wasPressedThisFrame)
         {
             ToggleAttackMode();
+            chargeCancelled=true;
         }
         else if (mouse.rightButton.wasPressedThisFrame)
         {
             CancelDraw();
+            chargeCancelled=true;
         }
         else
         {
-            if (mouse.leftButton.wasPressedThisFrame) BeginDraw();
-            AdvanceCharge(Time.deltaTime);
-            releaseAfterMovement = drawing && mouse.leftButton.wasReleasedThisFrame;
+            if (mouse.leftButton.wasPressedThisFrame && !AutoChargeActive) BeginDraw();
         }
+        bool automaticThisFrame=AutoChargeActive;
+        AdvanceCharge(Time.deltaTime,!chargeCancelled,mouse.leftButton.isPressed);
+        if(!chargeCancelled)releaseAfterMovement=drawing &&
+            (automaticThisFrame?mouse.leftButton.wasPressedThisFrame:mouse.leftButton.wasReleasedThisFrame);
         // Apply this frame's charge state so release/cancel restores speed immediately.
         float frameSpeed = releaseAfterMovement ? moveSpeed : CurrentMoveSpeed;
-        controller.Move(((transform.right * input.x + transform.forward * input.y) * frameSpeed + Vector3.up * verticalSpeed) * Time.deltaTime);
+        controller.Move((transform.right * input.x + transform.forward * input.y) * frameSpeed * (Time.deltaTime-dashTime)
+            + Vector3.up * verticalSpeed * Time.deltaTime);
         AdvanceBowAnimation(Time.deltaTime);
         UpdateBow();
         if (releaseAfterMovement) ReleaseArrow();
@@ -291,6 +417,7 @@ public class DungeonArcher : MonoBehaviour
     void OnGUI()
     {
         if(!DungeonStartScreen.BattleStarted)return;
+        DrawDashFeedback();
         if (healFlash > 0)
         {
             GUI.color = new Color(.05f,1f,.2f,healFlash * .35f);
@@ -312,6 +439,13 @@ public class DungeonArcher : MonoBehaviour
         }
         GUI.color=Color.white;
         if (IsDead || DungeonStartScreen.BattleEnded)return;
+        var dashStyle=new GUIStyle(GUI.skin.label){font=hudFont,fontSize=17};
+        GUI.Label(new Rect(20,82,310,30),DashCooldownRemaining>0?
+            "돌진  ·  "+Mathf.CeilToInt(DashCooldownRemaining)+"초":"SHIFT 돌진  ·  준비 완료",dashStyle);
+        GUI.Label(new Rect(20,110,310,26),"방향키로 돌진 방향 선택",new GUIStyle(dashStyle){fontSize=14});
+        GUI.Label(new Rect(20,142,340,30),AutoChargeActive?"Q 자동 충전  ·  "+AutoChargeRemaining.ToString("0.0")+"초":
+            AutoChargeCooldownRemaining>0?"Q 자동 충전  ·  대기 "+Mathf.CeilToInt(AutoChargeCooldownRemaining)+"초":"Q 자동 충전  ·  준비 완료",dashStyle);
+        if(AutoChargeActive)GUI.Label(new Rect(20,170,340,26),"좌클릭으로 발사 · 발사 후 자동 재충전",new GUIStyle(dashStyle){fontSize=14});
         float x=Screen.width*.5f, y=Screen.height*.5f;
         GUI.color=Color.Lerp(new Color(1,.9f,.65f,.9f),new Color(1,.12f,.08f,1),HitMarkerAlpha);
         GUI.DrawTexture(new Rect(x-7,y-1,14,2),Texture2D.whiteTexture);
@@ -327,7 +461,7 @@ public class DungeonArcher : MonoBehaviour
         GUI.Label(new Rect(Screen.width-330,Screen.height-105,300,34),Mode==AttackMode.Heavy?"강공  ·  완충 시 직선 강타":"속공  ·  완충 시 3발 유도",modeStyle);
         var hintStyle=new GUIStyle(modeStyle){fontSize=15};
         hintStyle.normal.textColor=new Color(.8f,.83f,.85f);
-        GUI.Label(new Rect(Screen.width-330,Screen.height-70,300,28),"TAB 전환   |   장전 "+CurrentChargeSeconds.ToString("0.00")+"초",hintStyle);
+        GUI.Label(new Rect(Screen.width-330,Screen.height-70,300,28),"TAB 전환   |   장전 "+EffectiveChargeSeconds.ToString("0.00")+"초",hintStyle);
         if(Cursor.lockState!=CursorLockMode.Locked)
         {
             var pauseStyle=new GUIStyle(GUI.skin.label){font=hudFont,fontSize=28,fontStyle=FontStyle.Bold,alignment=TextAnchor.MiddleCenter};

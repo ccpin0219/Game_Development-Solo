@@ -6,13 +6,94 @@ using UnityEditor.SceneManagement;
 
 public static class FixedDungeonBuilder
 {
-    const string Folder="Assets/Dungeon/FixedDungeon";
+    static string Folder="Assets/Dungeon/FixedDungeon";
     static Transform root;
     static Mesh block,cube;
     static Material stone,edge,dark,gold,teal,glow,amber,floorA,floorB;
     static readonly Dictionary<Vector2Int,float> cells=new Dictionary<Vector2Int,float>();
     static readonly List<MeshFilter> geometry=new List<MeshFilter>();
     static System.Random random;
+
+    [MenuItem("Tools/Dungeon/Build Three By Three Sanctum")]
+    public static void BuildGrid()
+    {
+        if(Application.isPlaying)throw new System.InvalidOperationException("Use edit mode.");
+        if(GameObject.Find("Grid Sanctum Dungeon")!=null)throw new System.InvalidOperationException("Grid already exists.");
+        var prefab=AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Dungeon/Skeleton/Axe Skeleton.prefab");
+        var boss=Object.FindFirstObjectByType<DungeonBoss>(FindObjectsInactive.Include);
+        if(prefab==null || boss==null)throw new System.InvalidOperationException("Missing combat assets.");
+        foreach(string name in new[]{"Fixed Sanctum Dungeon","Dungeon Room Encounters","Skeleton Encounters"}){
+            var old=GameObject.Find(name);if(old!=null){Undo.RecordObject(old,"Replace dungeon layout");old.SetActive(false);}
+        }
+        Folder="Assets/Dungeon/GridDungeon";
+        if(!AssetDatabase.IsValidFolder(Folder))AssetDatabase.CreateFolder("Assets/Dungeon","GridDungeon");
+        random=new System.Random(319);cells.Clear();geometry.Clear();
+        root=new GameObject("Grid Sanctum Dungeon").transform;Undo.RegisterCreatedObjectUndo(root.gameObject,"Build 3 by 3 dungeon");
+        block=AssetDatabase.LoadAssetAtPath<Mesh>("Assets/Dungeon/Guardian/Bevel Block.asset");cube=Resources.GetBuiltinResource<Mesh>("Cube.fbx");
+        stone=Mat("Blue Grey Limestone");edge=Mat("Pale Carved Edges");dark=Mat("Recessed Basalt");gold=Mat("Antique Brass Inlay");teal=Mat("Sanctum Teal");glow=Mat("Quiet Azure Runes");
+        floorA=NewMaterial("Grid flagstone A",new Color(.26f,.3f,.33f));floorB=NewMaterial("Grid flagstone B",new Color(.19f,.24f,.28f));
+        amber=NewMaterial("Key gold",new Color(1,.65f,.18f));amber.EnableKeyword("_EMISSION");amber.SetColor("_EmissionColor",new Color(1,.38f,.04f)*2);
+        Room(-8,8,-204,-180,9);Room(-4,4,-180,-164,7);
+        for(int row=0;row<3;row++)for(int col=0;col<3;col++){
+            int x=(col-1)*32,z=-152+row*32;Room(x-12,x+12,z-12,z+12,row==1?11:10);
+            if(col<2)Room(x+12,x+20,z-4,z+4,7);
+            if(row<2)Room(x-4,x+4,z+12,z+20,7);
+        }
+        Room(-4,4,-76,-52,8);BuildShell();
+        var encounters=new GameObject("Grid Room Encounters").transform;encounters.SetParent(root,false);
+        var exploration=root.gameObject.AddComponent<DungeonExploration>();
+        var rooms=new List<DungeonRoomEncounter>();var keys=new List<Transform>();
+        string[] names={"서쪽 묘실","고요한 전실","동쪽 무기고","잊힌 서고","순례자의 홀","푸른 제단","서쪽 감시실","수호자의 회랑","동쪽 유적"};
+        for(int row=0;row<3;row++)for(int col=0;col<3;col++){
+            float x=(col-1)*32,z=-152+row*32;bool safe=row==0&&col==1;
+            var portals=new List<Vector3>();
+            if(col>0)portals.Add(new Vector3(x-12,90,z));
+            if(col<2)portals.Add(new Vector3(x+12,90,z));
+            if(row>0 || safe)portals.Add(new Vector3(x,0,z-12));
+            if(row<2 || col==1)portals.Add(new Vector3(x,0,z+12));
+            foreach(var p in portals){
+                // A doorway arch is authored along Z, then rotated around the portal for east/west doors.
+                int first=geometry.Count;Arch(p.x,p.z,3.65f,4.5f);
+                if(p.y!=0)for(int i=first;i<geometry.Count;i++){var t=geometry[i].transform;var pivot=new Vector3(p.x,0,p.z);t.position=pivot+Quaternion.Euler(0,90,0)*(t.position-pivot);t.rotation=Quaternion.Euler(0,90,0)*t.rotation;}
+            }
+            foreach(float sx in new[]{-1f,1f})foreach(float sz in new[]{-1f,1f})Column(new Vector3(x+sx*9,0,z+sz*9),row==1?10:9);
+            foreach(float offset in new[]{-8f,0f,8f})Box("Chamber vault rib",new Vector3(x,row==1?10.6f:9.6f,z+offset),new Vector3(23.7f,.65f,.6f),edge);
+            Box("Room central inlay",new Vector3(x,.032f,z),new Vector3(6,.06f,6),dark);
+            foreach(float s in new[]{-1f,1f})Box("Room inlay border",new Vector3(x+s*3,.07f,z),new Vector3(.08f,.06f,6),gold);
+            Torch(new Vector3(x-10,0,z-7));Torch(new Vector3(x+10,0,z+7));
+            if(!safe){
+                var room=DungeonEncounterBuilder.Room(encounters,names[row*3+col],new Vector3(x,3,z),new Vector3(21,8,21));
+                DungeonEncounterBuilder.Enemies(room,prefab,new Vector3(x-5,.08f,z+2),new Vector3(x+5,.08f,z-3));
+                DungeonEncounterBuilder.Doors(room,portals.ToArray());rooms.Add(room);
+                // Every eligible room has one authored spawn. Exactly two are activated per run.
+                var key=new GameObject("Boss Key Spawn").transform;key.SetParent(root);key.position=new Vector3(x+6,1.5f,z+6);
+                for(int i=0;i<8;i++){float a=i*Mathf.PI/4,b=(i+1)*Mathf.PI/4;var p=new Vector3(Mathf.Cos(a)*.32f,.5f+Mathf.Sin(a)*.32f,0);var q=new Vector3(Mathf.Cos(b)*.32f,.5f+Mathf.Sin(b)*.32f,0);KeyPiece(key,(p+q)*.5f,new Vector3(.1f,(q-p).magnitude,.1f),Quaternion.FromToRotation(Vector3.up,q-p));}
+                KeyPiece(key,new Vector3(0,-.13f,0),new Vector3(.1f,.8f,.1f),Quaternion.identity);
+                KeyPiece(key,new Vector3(.13f,-.37f,0),new Vector3(.32f,.1f,.1f),Quaternion.identity);
+                KeyPiece(key,new Vector3(.13f,-.15f,0),new Vector3(.32f,.1f,.1f),Quaternion.identity);
+                key.gameObject.SetActive(false);keys.Add(key);
+                Box("Key dais",new Vector3(x+6,.2f,z+6),new Vector3(1.5f,.4f,1.5f),dark,true);
+                // Edge decorations leave all four door approaches and the central combat area clear.
+                if((row+col)%2==0){foreach(float dx in new[]{-5f,5f}){Box("Ancient sarcophagus",new Vector3(x+dx,.65f,z-9),new Vector3(2,1.3f,3),dark,true);Box("Carved sarcophagus lid",new Vector3(x+dx,1.4f,z-9),new Vector3(2.2f,.2f,3.2f),edge);}}
+                else foreach(float dx in new[]{-6f,6f}){Box("Wall tapestry",new Vector3(x+dx,5,z+11.3f),new Vector3(2,4,.12f),teal);Box("Tapestry trim",new Vector3(x+dx,7.1f,z+11.2f),new Vector3(2.3f,.15f,.2f),gold);}
+            }
+        }
+        exploration.keyRooms=rooms.ToArray();exploration.keySpawns=keys.ToArray();exploration.seals=new Transform[0];
+        Arch(0,-198,6,4.7f);Arch(0,-182,3.65f,4.5f);Arch(0,-170,3.65f,4.5f);Arch(0,-68,3.65f,4.7f);Arch(0,-57,3.65f,4.7f);
+        Torch(new Vector3(-6,0,-196));Torch(new Vector3(6,0,-184));
+        // Two-key lock is separate from the arena encounter gate.
+        var gate=new GameObject("Two Key Boss Gate").transform;gate.SetParent(root);gate.position=new Vector3(0,0,-64);
+        for(int i=-7;i<=7;i++){var t=Box("Boss gate iron",new Vector3(i*.52f,3.8f,-64),new Vector3(.14f,7.6f,.25f),gold);geometry.Remove(t.GetComponent<MeshFilter>());t.SetParent(gate,true);t.gameObject.isStatic=false;}
+        foreach(float y in new[]{1f,5.8f}){var t=Box("Boss gate brace",new Vector3(0,y,-64),new Vector3(8,.25f,.3f),dark);geometry.Remove(t.GetComponent<MeshFilter>());t.SetParent(gate,true);t.gameObject.isStatic=false;}
+        var blocker=gate.gameObject.AddComponent<BoxCollider>();blocker.center=new Vector3(0,3.8f,0);blocker.size=new Vector3(8,7.6f,.6f);exploration.gate=gate;
+        Box("Arena south west wall",new Vector3(-20,14,-55.5f),new Vector3(32,28,3),stone,true);
+        Box("Arena south east wall",new Vector3(20,14,-55.5f),new Vector3(32,28,3),stone,true);
+        Box("Arena entrance lintel",new Vector3(0,18,-55.5f),new Vector3(8,20,3),stone,true);
+        var arena=DungeonEncounterBuilder.Room(encounters,"수호자의 전당",new Vector3(0,8,1),new Vector3(68,20,100));arena.boss=boss;boss.gameObject.SetActive(false);DungeonEncounterBuilder.Doors(arena,new Vector3(0,0,-54));
+        var player=Object.FindFirstObjectByType<DungeonArcher>();Undo.RecordObject(player.transform,"Move grid spawn");player.transform.position=new Vector3(0,.08f,-192);player.transform.rotation=Quaternion.identity;
+        Combine();AssetDatabase.SaveAssets();EditorSceneManager.MarkSceneDirty(root.gameObject.scene);EditorSceneManager.SaveScene(root.gameObject.scene);
+    }
+    static void KeyPiece(Transform parent,Vector3 p,Vector3 size,Quaternion rotation){var g=new GameObject("Golden Key");g.transform.SetParent(parent,false);g.transform.localPosition=p;g.transform.localScale=size;g.transform.localRotation=rotation;g.AddComponent<MeshFilter>().sharedMesh=block;g.AddComponent<MeshRenderer>().sharedMaterial=amber;}
 
     [MenuItem("Tools/Dungeon/Build Fixed Sanctum")]
     public static void Build()

@@ -9,7 +9,8 @@ public class DungeonBoss : MonoBehaviour, IDungeonDamageable
     public float Health { get; private set; }
     public bool Defeated => Health <= 0;
     const string BestTimeKey = "DungeonBoss.FastestClearSeconds.v1";
-    public float BattleTime { get; private set; }
+    float battleTime;
+    public float BattleTime => battleTime + DungeonStartScreen.RevivalPenalty;
     public float BestClearTime { get; private set; }
     public bool ClearRecorded { get; private set; }
     public bool NewBest { get; private set; }
@@ -143,6 +144,13 @@ public class DungeonBoss : MonoBehaviour, IDungeonDamageable
     {
         if (Defeated || damage <= 0) return;
         Health = Mathf.Max(0, Health - damage);
+        // Fractional arrow damage can leave a rounding remainder in the separately
+        // accumulated total. Destroying every part must always finish the encounter.
+        bool allPartsBroken = Parts != null && Parts.Length > 0;
+        if (allPartsBroken)
+            foreach (var part in Parts)
+                if (part == null || !part.Broken) { allPartsBroken = false; break; }
+        if (allPartsBroken) Health = 0;
         if (Defeated)
         {
             RecordClear();
@@ -158,8 +166,7 @@ public class DungeonBoss : MonoBehaviour, IDungeonDamageable
     }
     void Update()
     {
-        if (player != null && player.IsDead && volley != null) Destroy(volley.gameObject);
-        if(player!=null && player.IsDead){hammerPhase=0;hammerImpact.enabled=false;specials.Cancel();circleAttacks.Cancel();laserAttacks.Cancel();leap.Cancel();floorAttack.Cancel();}
+        if(player!=null && player.IsDead)return;
         if (player != null && !player.IsDead && Cursor.lockState == CursorLockMode.Locked)
             Simulate(Time.deltaTime);
         else if (warning != null) warning.enabled = false;
@@ -182,7 +189,7 @@ public class DungeonBoss : MonoBehaviour, IDungeonDamageable
     {
         if(!DungeonStartScreen.BattleStarted || !DungeonExploration.ArenaReady)return;
         if(Defeated || player==null || player.IsDead)return;
-        BattleTime+=Mathf.Max(0,dt);
+        battleTime+=Mathf.Max(0,dt);
         if(openingDelay>0)
         {
             float wait=Mathf.Min(dt,openingDelay);
