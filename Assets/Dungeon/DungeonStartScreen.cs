@@ -194,8 +194,6 @@ public class DungeonStartScreen : MonoBehaviour
         GUI.Label(new Rect(titleRect.x+4,titleRect.y+4,titleRect.width,titleRect.height),"잿빛 성소",titleStyle);
         GUI.color=Color.white;
         GUI.Label(titleRect,"잿빛 성소",titleStyle);
-        Fill(new Rect(98,282,28,2),Gold);
-        GUI.Label(new Rect(142,269,300,32),"돌의 수호자",smallStyle);
         bool previousEnabled=GUI.enabled;
         GUI.enabled=!showRanking && guidePage<0;
         if(MenuButton(new Rect(96,374,340,52),"탐험 시작",selected==0,0))StartBattle();
@@ -203,7 +201,6 @@ public class DungeonStartScreen : MonoBehaviour
         if(MenuButton(new Rect(96,502,340,52),"나가기",selected==2,2))QuitGame();
         GUI.enabled=previousEnabled;
         GUI.Label(new Rect(98,605,400,28),"BEST  /  "+(boss==null || boss.BestClearTime<0?"--:--.--":DungeonBoss.FormatTime(boss.BestClearTime)),smallStyle);
-        GUI.Label(new Rect(98,667,520,24),"W/S 선택    ENTER 확인    마우스로 선택 가능",smallStyle);
         // Lightweight drifting embers; no new scene objects or particle materials.
         for(int i=0;i<18;i++)
         {

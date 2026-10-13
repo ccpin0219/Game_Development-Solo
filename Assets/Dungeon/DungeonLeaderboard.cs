@@ -5,6 +5,8 @@ using UnityEngine;
 // Local records survive scene reloads and application restarts.
 public class DungeonLeaderboard
 {
+    const string DefaultKey="AshenSanctum.Leaderboard.v1";
+    const string ResetKey="AshenSanctum.RankingReset.20261013";
     [Serializable]
     public class Entry
     {
@@ -18,8 +20,16 @@ public class DungeonLeaderboard
     SaveData data;
     public IReadOnlyList<Entry> Entries => data.entries;
 
-    public DungeonLeaderboard(string key = "AshenSanctum.Leaderboard.v1")
+    public DungeonLeaderboard(string key = DefaultKey)
     {
+        // Clear the old balance's records once, then retain all newly earned scores.
+        if(key==DefaultKey && !PlayerPrefs.HasKey(ResetKey))
+        {
+            PlayerPrefs.DeleteKey(DefaultKey);
+            PlayerPrefs.DeleteKey("DungeonBoss.FastestClearSeconds.v1");
+            PlayerPrefs.SetInt(ResetKey,1);
+            PlayerPrefs.Save();
+        }
         storageKey=key;
         try { data=JsonUtility.FromJson<SaveData>(PlayerPrefs.GetString(key,"")); }
         catch(ArgumentException) { data=null; }
