@@ -4,7 +4,7 @@ public interface IDungeonDamageable { void TakeDamage(float damage); }
 public class DungeonArrow : MonoBehaviour
 {
     public enum ShotKind { Normal, Power, Split, Homing }
-    public const float HomingDamageRatio = .4f;
+    public const float HomingDamageRatio = .5f;
     public float Damage { get; private set; }
     public bool HasHit { get; private set; }
     public ShotKind Kind { get; private set; }
@@ -15,6 +15,14 @@ public class DungeonArrow : MonoBehaviour
     Material shaftMaterial, tipMaterial;
     TrailRenderer flightTrail;
     TrailRenderer coreTrail;
+    static int syncedFrame=-1;
+
+    public static bool CanHit(Collider collider)
+    {
+        if(!collider.isTrigger)return true;
+        var skeleton=collider.GetComponentInParent<DungeonSkeleton>();
+        return skeleton!=null && skeleton.Health>0;
+    }
 
     public void Initialize(Vector3 initialVelocity, float damage, Collider shooter, Material shaft, Material tip,
         ShotKind kind = ShotKind.Normal, MonoBehaviour target = null)
@@ -56,10 +64,11 @@ public class DungeonArrow : MonoBehaviour
         DungeonArcher.Segment("Arrowhead",parent,new Vector3(0,0,.3f),new Vector3(0,0,.4f),.035f,tip);
         DungeonArcher.Segment("Fletching",parent,new Vector3(-.045f,0,-.23f),new Vector3(.045f,0,-.23f),.025f,tip);
     }
-    void Update()
+    void LateUpdate()
     {
         if(!DungeonStartScreen.BattleStarted||Cursor.lockState!=CursorLockMode.Locked)return;
         if(DungeonStartScreen.BattleEnded){Destroy(gameObject);return;}
+        if(syncedFrame!=Time.frameCount){Physics.SyncTransforms();syncedFrame=Time.frameCount;}
         Simulate(Time.deltaTime);
     }
     public void Simulate(float dt)
@@ -97,10 +106,10 @@ public class DungeonArrow : MonoBehaviour
         }
         else if(Kind!=ShotKind.Power) velocity+=Vector3.down*9.81f*dt;
         Vector3 step=velocity*dt;
-        var hits=Physics.SphereCastAll(transform.position,.045f,step.normalized,step.magnitude,~0,QueryTriggerInteraction.Ignore);
+        var hits=Physics.SphereCastAll(transform.position,.045f,step.normalized,step.magnitude,~0,QueryTriggerInteraction.Collide);
         System.Array.Sort(hits,(a,b)=>a.distance.CompareTo(b.distance));
         // Sweep casts omit initial overlaps, which can occur when a target moves into a shard.
-        foreach(var c in Physics.OverlapSphere(transform.position,.045f,~0,QueryTriggerInteraction.Ignore))
+        foreach(var c in Physics.OverlapSphere(transform.position,.045f,~0,QueryTriggerInteraction.Collide))
             if(!Ignored(c)&&Contact(c,transform.position,-velocity.normalized))return;
         foreach(var hit in hits)
             if(!Ignored(hit.collider)&&Contact(hit.collider,hit.point,hit.normal))return;
@@ -111,7 +120,7 @@ public class DungeonArrow : MonoBehaviour
     }
     bool Ignored(Collider c)
     {
-        if(c==owner||c.transform.IsChildOf(transform))return true;
+        if(!CanHit(c)||c==owner||c.transform.IsChildOf(transform))return true;
         var enemy=Enemy(c);
         // Guided shards seek the boss's actual weak-point collider, rather than being
         // consumed by its surrounding armour while turning toward the exposed cap.
@@ -125,6 +134,10 @@ public class DungeonArrow : MonoBehaviour
         float healthBefore=EnemyHealth(enemy);
         var part=collider.GetComponent<DungeonBossPart>();
         if(part!=null){if(!part.Broken)part.TakeDamage(Damage);}
+        // A fully charged heavy arrow kills ordinary skeletons regardless of their health.
+        // Boss weak-point damage continues to use the normal damage value above.
+        else if(Kind==ShotKind.Power && enemy is DungeonSkeleton skeleton)
+            skeleton.TakeDamage(Mathf.Max(Damage,skeleton.Health));
         else if(collider.GetComponentInParent<DungeonBoss>()==null)
             foreach(var behaviour in collider.GetComponentsInParent<MonoBehaviour>())
                 if(behaviour is IDungeonDamageable damageable){damageable.TakeDamage(Damage);break;}

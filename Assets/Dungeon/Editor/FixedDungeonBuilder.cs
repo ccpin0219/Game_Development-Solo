@@ -14,6 +14,77 @@ public static class FixedDungeonBuilder
     static readonly List<MeshFilter> geometry=new List<MeshFilter>();
     static System.Random random;
 
+    public static void VerifyStartingRoom()
+    {
+        EditorSceneManager.OpenScene("Assets/Scenes/SampleScene.unity");
+        Physics.SyncTransforms();
+        foreach(float x in new[]{-14f,0f,14f})foreach(float z in new[]{-210f,-196f,-184f})
+            if(!Physics.Raycast(new Vector3(x,2,z),Vector3.down,out var floor,3) || Mathf.Abs(floor.point.y)>.1f)
+                throw new System.Exception("Missing start floor at "+x+", "+z);
+        foreach(float side in new[]{-1f,1f})
+            if(!Physics.Raycast(new Vector3(0,1,-196),Vector3.right*side,out var wall,18) || Mathf.Abs(Mathf.Abs(wall.point.x)-15.675f)>.1f)
+                throw new System.Exception("Side wall does not match expanded room");
+        var probe=new GameObject("Temporary collision probe");
+        var controller=probe.AddComponent<CharacterController>();controller.height=2;controller.radius=.3f;controller.center=Vector3.up;
+        Vector3[] starts={new Vector3(12,.08f,-196),new Vector3(-12,.08f,-196),new Vector3(0,.08f,-208),new Vector3(10,.08f,-184),new Vector3(0,.08f,-184)};
+        Vector3[] directions={Vector3.right,Vector3.left,Vector3.back,Vector3.forward,Vector3.forward};
+        for(int i=0;i<starts.Length;i++)
+        {
+            controller.enabled=false;probe.transform.position=starts[i];controller.enabled=true;Physics.SyncTransforms();
+            for(int step=0;step<32;step++)controller.Move(directions[i]*.25f);
+            var p=probe.transform.position;
+            if((i<2 && Mathf.Abs(p.x)>15.6f) || (i==2 && p.z<-211.6f) || (i==3 && p.z>-180.4f) || (i==4 && p.z<-178))
+                throw new System.Exception("Character collision/doorway failed: "+i+" at "+p);
+        }
+        Object.DestroyImmediate(probe);
+        Debug.Log("START_ROOM_VERIFY_PASS: 9 floor rays, 2 wall rays, 4 wall movement checks and open doorway.");
+    }
+
+    [MenuItem("Tools/Dungeon/Repair Expanded Starting Room")]
+    public static void RepairStartingRoom()
+    {
+        if(Application.isPlaying)throw new System.InvalidOperationException("Use edit mode.");
+        if(GameObject.Find("Grid Sanctum Dungeon")==null)
+            EditorSceneManager.OpenScene("Assets/Scenes/SampleScene.unity");
+        root=GameObject.Find("Grid Sanctum Dungeon").transform;
+        if(root.Find("Expanded Starting Room Authored")!=null)return;
+        Folder="Assets/Dungeon/GridDungeon";
+        random=new System.Random(319);cells.Clear();geometry.Clear();
+        block=AssetDatabase.LoadAssetAtPath<Mesh>("Assets/Dungeon/Guardian/Bevel Block.asset");cube=Resources.GetBuiltinResource<Mesh>("Cube.fbx");
+        stone=Mat("Blue Grey Limestone");edge=Mat("Pale Carved Edges");dark=Mat("Recessed Basalt");gold=Mat("Antique Brass Inlay");
+        floorA=AssetDatabase.LoadAssetAtPath<Material>(Folder+"/Grid flagstone A.mat");
+        floorB=AssetDatabase.LoadAssetAtPath<Material>(Folder+"/Grid flagstone B.mat");
+        foreach(var child in root.Cast<Transform>().ToArray())
+        {
+            var filter=child.GetComponent<MeshFilter>();
+            if(child.name.StartsWith("Masonry ") && filter!=null)
+            {
+                var mesh=filter.sharedMesh;var vertices=mesh.vertices;var indices=mesh.triangles;
+                var keep=new List<int>();
+                for(int i=0;i<indices.Length;i+=3)
+                {
+                    float z=(vertices[indices[i]].z+vertices[indices[i+1]].z+vertices[indices[i+2]].z)/3;
+                    if(z<-179.4f)continue;
+                    keep.Add(indices[i]);keep.Add(indices[i+1]);keep.Add(indices[i+2]);
+                }
+                if(keep.Count==indices.Length)continue;
+                mesh.triangles=keep.ToArray();mesh.RecalculateBounds();EditorUtility.SetDirty(mesh);
+                if(keep.Count==0)Object.DestroyImmediate(child.gameObject);
+            }
+            else if(child.position.z<=-180 && (child.GetComponent<Collider>()!=null ||
+                child.name=="Wall Torch" || child.GetComponent<Light>()!=null))Object.DestroyImmediate(child.gameObject);
+        }
+        Room(-16,16,-212,-180,9);Room(-4,4,-180,-164,7);
+        BuildShell(true);
+        Arch(0,-204,6,4.7f);Arch(0,-182,3.65f,4.5f);
+        Torch(new Vector3(-14,0,-202));Torch(new Vector3(14,0,-186));
+        Combine("StartingRoomChunk");
+        new GameObject("Expanded Starting Room Authored").transform.SetParent(root,false);
+        AssetDatabase.SaveAssets();EditorSceneManager.MarkSceneDirty(root.gameObject.scene);
+        EditorSceneManager.SaveScene(root.gameObject.scene);
+        Debug.Log("START_ROOM_REPAIR_SAVED: 32 x 32 authored room with matching solid shell.");
+    }
+
     [MenuItem("Tools/Dungeon/Build Three By Three Sanctum")]
     public static void BuildGrid()
     {
@@ -33,7 +104,7 @@ public static class FixedDungeonBuilder
         stone=Mat("Blue Grey Limestone");edge=Mat("Pale Carved Edges");dark=Mat("Recessed Basalt");gold=Mat("Antique Brass Inlay");teal=Mat("Sanctum Teal");glow=Mat("Quiet Azure Runes");
         floorA=NewMaterial("Grid flagstone A",new Color(.26f,.3f,.33f));floorB=NewMaterial("Grid flagstone B",new Color(.19f,.24f,.28f));
         amber=NewMaterial("Key gold",new Color(1,.65f,.18f));amber.EnableKeyword("_EMISSION");amber.SetColor("_EmissionColor",new Color(1,.38f,.04f)*2);
-        Room(-8,8,-204,-180,9);Room(-4,4,-180,-164,7);
+        Room(-16,16,-212,-180,9);Room(-4,4,-180,-164,7);
         for(int row=0;row<3;row++)for(int col=0;col<3;col++){
             int x=(col-1)*32,z=-152+row*32;Room(x-12,x+12,z-12,z+12,row==1?11:10);
             if(col<2)Room(x+12,x+20,z-4,z+4,7);
@@ -189,10 +260,11 @@ public static class FixedDungeonBuilder
         var f=g.AddComponent<MeshFilter>();f.sharedMesh=bevel?block:cube;g.AddComponent<MeshRenderer>().sharedMaterial=material;geometry.Add(f);
         if(collision)g.AddComponent<BoxCollider>();return g.transform;
     }
-    static void BuildShell()
+    static void BuildShell(bool startingRoomOnly=false)
     {
         Vector2Int[] dirs={Vector2Int.left,Vector2Int.right,Vector2Int.down,Vector2Int.up};
         foreach(var cell in cells){
+            if(startingRoomOnly && cell.Key.y>=-45)continue;
             var c=new Vector3(cell.Key.x*4+2,0,cell.Key.y*4+2);float h=cell.Value;
             Box("Floor foundation",c+Vector3.down*.3f,new Vector3(4,.6f,4),dark,true,false);
             Box("Worn floor tile",c+Vector3.up*.025f,new Vector3(3.94f,.05f,3.94f),random.Next(3)==0?floorA:floorB,false,false);
@@ -221,7 +293,7 @@ public static class FixedDungeonBuilder
     static void Torch(Vector3 p){var torch=DungeonWallTorches.Place(root,p);LightAt(torch.transform.TransformPoint(new Vector3(0,.35f,1)),new Color(1,.52f,.23f),4,12);}
     static void LightAt(Vector3 p,Color c,float intensity,float range){var g=new GameObject("Local chamber light");g.transform.SetParent(root);g.transform.position=p;var l=g.AddComponent<Light>();l.type=LightType.Point;l.color=c;l.intensity=intensity;l.range=range;l.shadows=LightShadows.None;}
     static Transform Seal(Vector3 p){var g=new GameObject("Ancient seal").transform;g.SetParent(root);g.position=p;var plinth=Box("Seal pedestal",p+Vector3.up*.7f,new Vector3(1.6f,1.4f,1.6f),dark,true);plinth.SetParent(g,true);var crystal=Box("Seal Crystal",p+Vector3.up*1.85f,new Vector3(.7f,1.2f,.7f),glow);crystal.rotation=Quaternion.Euler(0,45,12);crystal.SetParent(g,true);geometry.Remove(crystal.GetComponent<MeshFilter>());crystal.gameObject.isStatic=false;LightAt(p+Vector3.up*2.5f,new Color(.15f,.65f,1),3,8);return g;}
-    static void Combine(){int index=0;foreach(var batch in geometry.GroupBy(f=>new {m=f.GetComponent<Renderer>().sharedMaterial,x=Mathf.FloorToInt(f.transform.position.x/24),z=Mathf.FloorToInt(f.transform.position.z/24)})){
-        var mesh=new Mesh();mesh.indexFormat=UnityEngine.Rendering.IndexFormat.UInt32;mesh.CombineMeshes(batch.Select(f=>new CombineInstance{mesh=f.sharedMesh,transform=f.transform.localToWorldMatrix}).ToArray(),true,true);mesh.name="Dungeon masonry chunk";AssetDatabase.CreateAsset(mesh,Folder+"/Chunk"+(index++)+".asset");var g=new GameObject("Masonry "+batch.Key.x+" "+batch.Key.z+" "+batch.Key.m.name);g.transform.SetParent(root);g.isStatic=true;g.AddComponent<MeshFilter>().sharedMesh=mesh;g.AddComponent<MeshRenderer>().sharedMaterial=batch.Key.m;
+    static void Combine(string prefix="Chunk"){int index=0;foreach(var batch in geometry.GroupBy(f=>new {m=f.GetComponent<Renderer>().sharedMaterial,x=Mathf.FloorToInt(f.transform.position.x/24),z=Mathf.FloorToInt(f.transform.position.z/24)})){
+        var mesh=new Mesh();mesh.indexFormat=UnityEngine.Rendering.IndexFormat.UInt32;mesh.CombineMeshes(batch.Select(f=>new CombineInstance{mesh=f.sharedMesh,transform=f.transform.localToWorldMatrix}).ToArray(),true,true);mesh.name="Dungeon masonry chunk";AssetDatabase.CreateAsset(mesh,Folder+"/"+prefix+(index++)+".asset");var g=new GameObject("Masonry "+batch.Key.x+" "+batch.Key.z+" "+batch.Key.m.name);g.transform.SetParent(root);g.isStatic=true;g.AddComponent<MeshFilter>().sharedMesh=mesh;g.AddComponent<MeshRenderer>().sharedMaterial=batch.Key.m;
     }foreach(var f in geometry){if(f.GetComponent<Collider>()!=null){UnityEngine.Object.DestroyImmediate(f.GetComponent<Renderer>());UnityEngine.Object.DestroyImmediate(f);}else UnityEngine.Object.DestroyImmediate(f.gameObject);}}
 }

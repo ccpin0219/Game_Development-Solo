@@ -10,7 +10,9 @@ public class DungeonBoss : MonoBehaviour, IDungeonDamageable
     public bool Defeated => Health <= 0;
     const string BestTimeKey = "DungeonBoss.FastestClearSeconds.v1";
     float battleTime;
-    public float BattleTime => battleTime + DungeonStartScreen.RevivalPenalty;
+    float recordedClearTime;
+    public float BattleTime => ClearRecorded?recordedClearTime:
+        DungeonExploration.Instance!=null?DungeonExploration.Instance.RunTime:battleTime+DungeonStartScreen.RevivalPenalty;
     public float BestClearTime { get; private set; }
     public bool ClearRecorded { get; private set; }
     public bool NewBest { get; private set; }
@@ -136,7 +138,8 @@ public class DungeonBoss : MonoBehaviour, IDungeonDamageable
             var hitShape=orb.GetComponent<MeshCollider>();if(hitShape==null)hitShape=orb.gameObject.AddComponent<MeshCollider>();
             hitShape.sharedMesh=weakPointCollisionMesh;hitShape.convex=true;
             var part=orb.GetComponent<DungeonBossPart>();if(part==null)part=orb.gameObject.AddComponent<DungeonBossPart>();
-            part.Initialize(this,label,label=="Torso"?300:label=="Head"?200:150);parts.Add(part);
+            // Full heavy hits deal 180: torso 5 + head 3 + four limbs 4 each = 24 hits.
+            part.Initialize(this,label,label=="Torso"?900:label=="Head"?540:720);parts.Add(part);
         }
         Parts=parts.ToArray();
     }
@@ -363,7 +366,7 @@ public class DungeonBoss : MonoBehaviour, IDungeonDamageable
         GUI.color=new Color(.04f,.04f,.05f,.85f);
         GUI.DrawTexture(new Rect(x,78,width,60),Texture2D.whiteTexture);
         GUI.color=ClearRecorded?new Color(.5f,1f,.65f):Color.white;
-        GUI.Label(new Rect(x,80,width,27),(ClearRecorded?"클리어 시간  ":"전투 시간  ")+FormatTime(BattleTime),timerStyle);
+        GUI.Label(new Rect(x,80,width,27),(ClearRecorded?"클리어 시간  ":"탐험 시간  ")+FormatTime(BattleTime),timerStyle);
         GUI.color=new Color(1f,.8f,.4f);
         GUI.Label(new Rect(x,107,width,27),"최고 기록  "+(BestClearTime<0?"기록 없음":FormatTime(BestClearTime))+(NewBest?"  ·  신기록!":""),timerStyle);
         GUI.color=Color.white;
@@ -371,6 +374,8 @@ public class DungeonBoss : MonoBehaviour, IDungeonDamageable
     void RecordClear()
     {
         if(ClearRecorded || !DungeonStartScreen.BattleStarted || player==null || player.IsDead)return;
+        recordedClearTime=BattleTime;
+        if(DungeonExploration.Instance!=null)DungeonExploration.Instance.CompleteRun();
         ClearRecorded=true;
         NewBest=BestClearTime<0 || BattleTime<BestClearTime;
         if(!NewBest)return;

@@ -7,10 +7,22 @@ public class DungeonArcher : MonoBehaviour
     public Camera view;
     public Material wood, metal, stringMaterial;
     public float moveSpeed = 8f, chargeSeconds = 1f;
+    const string SensitivityKey = "Dungeon.LookSensitivityLevel.v1";
+    public int LookSensitivityLevel { get; private set; } = 5;
+    public float LookSensitivity => SensitivityForLevel(LookSensitivityLevel);
+    public static float SensitivityForLevel(int level) => .03f + .015f * (Mathf.Clamp(level, 1, 10) - 1);
+    public void SetLookSensitivityLevel(int level)
+    {
+        level = Mathf.Clamp(level, 1, 10);
+        if (LookSensitivityLevel == level) return;
+        LookSensitivityLevel = level;
+        PlayerPrefs.SetInt(SensitivityKey, level);
+        PlayerPrefs.Save();
+    }
     public enum AttackMode { Heavy, Rapid }
     public AttackMode Mode { get; private set; } = AttackMode.Heavy;
     [Min(.05f)] public float rapidChargeSeconds = .35f;
-    // Full-charge cycles: heavy 180 / 1.30s; rapid (20 + 3 * 8) / .47s.
+    // Full-charge cycles: heavy 180 / 1.30s; rapid (20 + 3 * 10) / .47s.
     // Accurate heavy shots win on damage; rapid retains forgiving homing and faster retries.
     [Min(1)] public float heavyDamage = 90f, rapidDamage = 20f;
     [Min(1)] public float fullHeavyMultiplier = 2f;
@@ -158,6 +170,7 @@ public class DungeonArcher : MonoBehaviour
 
     void Awake()
     {
+        LookSensitivityLevel = Mathf.Clamp(PlayerPrefs.GetInt(SensitivityKey, 5), 1, 10);
         hudFont=Font.CreateDynamicFontFromOSFont(new[]{"Malgun Gothic","Apple SD Gothic Neo","Noto Sans CJK KR"},18);
         controller = GetComponent<CharacterController>();
         BuildBow();
@@ -247,7 +260,7 @@ public class DungeonArcher : MonoBehaviour
             UpdateBow();
             return;
         }
-        Vector2 look = mouse.delta.ReadValue() * .09f;
+        Vector2 look = mouse.delta.ReadValue() * LookSensitivity;
         transform.Rotate(0, look.x, 0);
         pitch = Mathf.Clamp(pitch - look.y, -80, 80);
         view.transform.localRotation = Quaternion.Euler(pitch, 0, 0);
@@ -255,8 +268,7 @@ public class DungeonArcher : MonoBehaviour
             (keys.wKey.isPressed ? 1 : 0) - (keys.sKey.isPressed ? 1 : 0));
         input = Vector2.ClampMagnitude(input, 1);
         if(keys.leftShiftKey.wasPressedThisFrame || keys.rightShiftKey.wasPressedThisFrame)
-            TryDash(new Vector2((keys.rightArrowKey.isPressed?1:0)-(keys.leftArrowKey.isPressed?1:0),
-                (keys.upArrowKey.isPressed?1:0)-(keys.downArrowKey.isPressed?1:0)));
+            TryDash(input);
         float dashTime=AdvanceDash(Time.deltaTime);
         if (controller.isGrounded && verticalSpeed < 0) verticalSpeed = -2;
         if (controller.isGrounded && keys.spaceKey.wasPressedThisFrame) verticalSpeed = 6;
@@ -296,6 +308,7 @@ public class DungeonArcher : MonoBehaviour
     {
         if (IsDead || !drawing || cooldown > 0 || !DungeonStartScreen.BattleStarted || DungeonStartScreen.BattleEnded) return;
         float power = Charge;
+        Physics.SyncTransforms();
         var projectile = new GameObject("Arrow");
         // Resolve the muzzle after this frame's movement so the shot leaves the visible bow.
         Vector3 cameraOrigin = view.transform.position;
@@ -310,8 +323,8 @@ public class DungeonArcher : MonoBehaviour
         // Converge from the offset bow to the crosshair, including close targets.
         float aimDistance = 200f;
         foreach (var hit in Physics.SphereCastAll(cameraOrigin, .045f, view.transform.forward,
-                     aimDistance, ~0, QueryTriggerInteraction.Ignore))
-            if (hit.collider != controller) aimDistance = Mathf.Min(aimDistance, hit.distance);
+                     aimDistance, ~0, QueryTriggerInteraction.Collide))
+            if (hit.collider != controller && DungeonArrow.CanHit(hit.collider)) aimDistance = Mathf.Min(aimDistance, hit.distance);
         if (aimDistance <= Vector3.Dot(origin - cameraOrigin, view.transform.forward) + .1f)
             origin = cameraOrigin;
         Vector3 direction = (cameraOrigin + view.transform.forward * aimDistance - origin).normalized;
@@ -439,13 +452,7 @@ public class DungeonArcher : MonoBehaviour
         }
         GUI.color=Color.white;
         if (IsDead || DungeonStartScreen.BattleEnded)return;
-        var dashStyle=new GUIStyle(GUI.skin.label){font=hudFont,fontSize=17};
-        GUI.Label(new Rect(20,82,310,30),DashCooldownRemaining>0?
-            "돌진  ·  "+Mathf.CeilToInt(DashCooldownRemaining)+"초":"SHIFT 돌진  ·  준비 완료",dashStyle);
-        GUI.Label(new Rect(20,110,310,26),"방향키로 돌진 방향 선택",new GUIStyle(dashStyle){fontSize=14});
-        GUI.Label(new Rect(20,142,340,30),AutoChargeActive?"Q 자동 충전  ·  "+AutoChargeRemaining.ToString("0.0")+"초":
-            AutoChargeCooldownRemaining>0?"Q 자동 충전  ·  대기 "+Mathf.CeilToInt(AutoChargeCooldownRemaining)+"초":"Q 자동 충전  ·  준비 완료",dashStyle);
-        if(AutoChargeActive)GUI.Label(new Rect(20,170,340,26),"좌클릭으로 발사 · 발사 후 자동 재충전",new GUIStyle(dashStyle){fontSize=14});
+        DrawSkillHud();
         float x=Screen.width*.5f, y=Screen.height*.5f;
         GUI.color=Color.Lerp(new Color(1,.9f,.65f,.9f),new Color(1,.12f,.08f,1),HitMarkerAlpha);
         GUI.DrawTexture(new Rect(x-7,y-1,14,2),Texture2D.whiteTexture);
@@ -458,10 +465,7 @@ public class DungeonArcher : MonoBehaviour
         GUI.color=Color.white;
         var modeStyle=new GUIStyle(GUI.skin.label){font=hudFont,fontSize=22,alignment=TextAnchor.MiddleRight};
         modeStyle.normal.textColor=modeColor;
-        GUI.Label(new Rect(Screen.width-330,Screen.height-105,300,34),Mode==AttackMode.Heavy?"강공  ·  완충 시 직선 강타":"속공  ·  완충 시 3발 유도",modeStyle);
-        var hintStyle=new GUIStyle(modeStyle){fontSize=15};
-        hintStyle.normal.textColor=new Color(.8f,.83f,.85f);
-        GUI.Label(new Rect(Screen.width-330,Screen.height-70,300,28),"TAB 전환   |   장전 "+EffectiveChargeSeconds.ToString("0.00")+"초",hintStyle);
+        GUI.Label(new Rect(Screen.width-330,Screen.height-105,300,34),Mode==AttackMode.Heavy?"강공":"속공",modeStyle);
         if(Cursor.lockState!=CursorLockMode.Locked)
         {
             var pauseStyle=new GUIStyle(GUI.skin.label){font=hudFont,fontSize=28,fontStyle=FontStyle.Bold,alignment=TextAnchor.MiddleCenter};
@@ -469,6 +473,69 @@ public class DungeonArcher : MonoBehaviour
             var resumeStyle=new GUIStyle(pauseStyle){fontSize=18,fontStyle=FontStyle.Normal};
             GUI.Label(new Rect(x-200,y+92,400,32),"클릭하면 계속합니다",resumeStyle);
         }
+    }
+    void DrawSkillHud()
+    {
+        var matrix=GUI.matrix;var color=GUI.color;
+        try
+        {
+            float scale=Mathf.Min(1.25f,Screen.width/1280f,Screen.height/720f);
+            GUI.matrix=Matrix4x4.TRS(new Vector3(20*scale,Screen.height-170*scale,0),Quaternion.identity,Vector3.one*scale);
+            DrawSkillTile(0,"SHIFT","돌진",DashCooldownRemaining,DashCooldownSeconds,IsDashing,0,new Color(1,.72f,.3f),false);
+            DrawSkillTile(112,"Q","자동 충전",AutoChargeCooldownRemaining,AutoChargeCooldownSeconds,AutoChargeActive,AutoChargeRemaining,new Color(.35f,.88f,.7f),true);
+        }
+        finally{GUI.matrix=matrix;GUI.color=color;}
+    }
+    void DrawSkillTile(float x,string key,string title,float cooldown,float maximum,bool active,float remaining,Color accent,bool chargeIcon)
+    {
+        var small=new GUIStyle(GUI.skin.label){font=hudFont,fontSize=14,alignment=TextAnchor.MiddleCenter};
+        var number=new GUIStyle(small){fontSize=27,fontStyle=FontStyle.Bold};
+        SkillFill(new Rect(x,22,88,88),active||cooldown<=0?accent:new Color(.3f,.37f,.4f));
+        SkillFill(new Rect(x+2,24,84,84),new Color(.035f,.06f,.075f,.96f));
+        GUI.color=Color.white;GUI.Label(new Rect(x,0,88,22),title,small);
+        Color ink=active||cooldown<=0?accent:new Color(.35f,.43f,.47f);
+        Vector2 c=new Vector2(x+44,63);
+        if(chargeIcon)
+        {
+            SkillStroke(c+new Vector2(8,-24),c+new Vector2(-13,3),ink,6);
+            SkillStroke(c+new Vector2(-13,3),c+new Vector2(12,3),ink,6);
+            SkillStroke(c+new Vector2(12,3),c+new Vector2(-8,26),ink,6);
+        }
+        else
+        {
+            for(int i=0;i<2;i++)
+            {
+                float offset=-17+i*23;
+                SkillStroke(c+new Vector2(offset-9,-17),c+new Vector2(offset+9,0),ink,5);
+                SkillStroke(c+new Vector2(offset+9,0),c+new Vector2(offset-9,17),ink,5);
+            }
+        }
+        if(cooldown>0 || active)
+        {
+            SkillFill(new Rect(x+3,25,82,75),new Color(0,0,0,.4f));
+            GUI.color=Color.white;
+            GUI.Label(new Rect(x+2,39,84,44),active?(chargeIcon?remaining.ToString("0.0"):"돌진"):Mathf.CeilToInt(cooldown).ToString(),number);
+        }
+        float progress=active&&chargeIcon?remaining/AutoChargeDuration:1-Mathf.Clamp01(cooldown/maximum);
+        SkillFill(new Rect(x+5,103,78*progress,3),accent);
+        SkillFill(new Rect(x+20,113,48,23),new Color(.12f,.18f,.22f,.95f));
+        GUI.color=Color.white;GUI.Label(new Rect(x+20,113,48,23),key,small);
+        var state=new GUIStyle(small){fontSize=11};
+        GUI.Label(new Rect(x-8,137,104,18),active?(chargeIcon?"사용 중 · 대기 "+Mathf.CeilToInt(cooldown)+"초":"사용 중"):cooldown>0?"재사용 대기":"준비 완료",state);
+    }
+    static void SkillFill(Rect rect,Color color)
+    {
+        var old=GUI.color;GUI.color=color;GUI.DrawTexture(rect,Texture2D.whiteTexture);GUI.color=old;
+    }
+    static void SkillStroke(Vector2 a,Vector2 b,Color color,float width)
+    {
+        var matrix=GUI.matrix;
+        try
+        {
+            GUI.matrix=matrix*Matrix4x4.TRS(new Vector3(a.x,a.y,0),Quaternion.Euler(0,0,Mathf.Atan2(b.y-a.y,b.x-a.x)*Mathf.Rad2Deg),Vector3.one);
+            SkillFill(new Rect(0,-width*.5f,Vector2.Distance(a,b),width),color);
+        }
+        finally{GUI.matrix=matrix;}
     }
     void DrawHitMarker(float x, float y)
     {

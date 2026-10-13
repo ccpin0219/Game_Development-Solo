@@ -37,7 +37,39 @@ public class DungeonRoomEncounter : MonoBehaviour
             closedPositions[i] = doorLeaves[i].localPosition - Vector3.up * doorTravel;
         SetBlockers(false);
         if (enemies != null) foreach (var enemy in enemies) if (enemy != null) enemy.gameObject.SetActive(false);
+        if(boss==null)BuildEnemyWave();
         if (boss != null) boss.gameObject.SetActive(false);
+    }
+
+    void BuildEnemyWave()
+    {
+        if(enemies==null)return;
+        var source=System.Array.Find(enemies,e=>e!=null && !e.ranged && !e.brawler);
+        if(source==null)return;
+        // Exactly one of each role, followed by three independent random choices.
+        int[] roles={0,1,2,Random.Range(0,3),Random.Range(0,3),Random.Range(0,3)};
+        for(int i=roles.Length-1;i>0;i--)
+        {
+            int other=Random.Range(0,i+1);
+            int role=roles[i];roles[i]=roles[other];roles[other]=role;
+        }
+        var wave=new DungeonSkeleton[6];
+        float spacingX=Mathf.Min(5,entryBounds.extents.x*.5f);
+        float spacingZ=Mathf.Min(4,entryBounds.extents.z*.4f);
+        for(int i=0;i<wave.Length;i++)
+        {
+            // The inactive template prevents Awake before role, health and home are configured.
+            var enemy=Instantiate(source,transform);
+            enemy.ranged=roles[i]==1;enemy.brawler=roles[i]==2;
+            enemy.maxHealth=enemy.ranged?DungeonSkeleton.ArcherHealth:
+                enemy.brawler?DungeonSkeleton.BrawlerHealth:DungeonSkeleton.AxeHealth;
+            enemy.name=enemy.ranged?"Skeleton Archer":enemy.brawler?"Skeleton Brawler":"Axe Skeleton";
+            enemy.transform.position=new Vector3(entryBounds.center.x+(i%3-1)*spacingX,
+                source.transform.position.y,entryBounds.center.z+(i<3?-spacingZ:spacingZ));
+            wave[i]=enemy;
+        }
+        foreach(var original in enemies)if(original!=null)Destroy(original.gameObject);
+        enemies=wave;
     }
 
     void Update()

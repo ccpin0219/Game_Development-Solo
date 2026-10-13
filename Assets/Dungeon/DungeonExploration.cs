@@ -22,8 +22,13 @@ public class DungeonExploration : MonoBehaviour
     readonly bool[] activated = new bool[2];
     DungeonArcher player;
     Font font;
+    DungeonRoomMap roomMap;
     int nearby = -1;
     bool rested;
+    float explorationSeconds;
+    bool runCompleted;
+    public float RunTime => explorationSeconds+DungeonStartScreen.RevivalPenalty;
+    public void CompleteRun(){runCompleted=true;}
     Vector3 gateRest;
     public int SealCount => (activated[0] ? 1 : 0) + (activated[1] ? 1 : 0);
 
@@ -33,7 +38,11 @@ public class DungeonExploration : MonoBehaviour
         font = Resources.Load<Font>("Fonts/NeoDunggeunmo");
         if(gate != null)gateRest=gate.position;
     }
-    void Start() { player=FindFirstObjectByType<DungeonArcher>(); }
+    void Start()
+    {
+        player=FindFirstObjectByType<DungeonArcher>();
+        if(UsesRoomKeys && player!=null)DungeonPracticeTarget.Create(transform,player);
+    }
     void OnDestroy() { if(Instance==this)Instance=null; }
     public bool ActivateSeal(int index)
     {
@@ -74,7 +83,8 @@ public class DungeonExploration : MonoBehaviour
     }
     public void Simulate(float dt)
     {
-        if(dt<=0 || player==null || !DungeonStartScreen.BattleStarted || DungeonStartScreen.BattleEnded)return;
+        if(dt<=0 || player==null || player.IsDead || DungeonStartScreen.IsPaused || !DungeonStartScreen.BattleStarted || DungeonStartScreen.BattleEnded)return;
+        if(!runCompleted)explorationSeconds+=dt;
         if(SealCount==2 && gate!=null)gate.position=Vector3.MoveTowards(gate.position,gateRest+Vector3.up*9,dt*3);
         nearby=-1;
         if(UsesRoomKeys)
@@ -102,17 +112,16 @@ public class DungeonExploration : MonoBehaviour
     }
     void OnGUI()
     {
-        if(!DungeonStartScreen.BattleStarted || DungeonStartScreen.BattleEnded || bossAwake)return;
-        var label=new GUIStyle(GUI.skin.label){font=font,fontSize=18,alignment=TextAnchor.UpperCenter};
-        label.normal.textColor=new Color(.8f,.87f,.87f);
-        string area=player==null?"":player.transform.position.z<-188?"성소의 입구":player.transform.position.x<-18?"잊힌 자의 납골당":player.transform.position.x>18?"푸른 봉인실":player.transform.position.z<-150?"순례자의 홀":player.transform.position.z<-100?"갈림 회랑":"수호자의 문";
+        if(!DungeonStartScreen.BattleStarted || DungeonStartScreen.BattleEnded)return;
         if(UsesRoomKeys && player!=null)
         {
-            area=player.transform.position.z<-174?"시작 방":player.transform.position.z>-76?"수호자의 문":"연결 회랑";
-            if(new Bounds(new Vector3(0,3,-152),new Vector3(24,8,24)).Contains(player.transform.position))area="고요한 전실 · 안전 구역";
-            foreach(var room in keyRooms)if(room!=null && room.entryBounds.Contains(player.transform.position)){area=room.roomName;break;}
+            if(roomMap==null)roomMap=new DungeonRoomMap(keyRooms);
+            if(!DungeonStartScreen.IsPaused && !player.IsDead)roomMap.Draw(player.transform.position,RunTime);
         }
-        GUI.Label(new Rect(Screen.width*.5f-260,24,520,30),area,label);
+        if(bossAwake)return;
+        if(UsesRoomKeys && player!=null && DungeonRoomMap.RoomAt(player.transform.position)==9)return;
+        var label=new GUIStyle(GUI.skin.label){font=font,fontSize=18,alignment=TextAnchor.UpperCenter};
+        label.normal.textColor=new Color(.8f,.87f,.87f);
         GUI.Label(new Rect(Screen.width*.5f-260,55,520,30),SealCount<2?(UsesRoomKeys?"보스 문 열쇠  ":"두 봉인을 해제하세요  ")+SealCount+" / 2":"문이 열렸습니다 · 전당으로 진입하세요",label);
         if(nearby>=0)GUI.Label(new Rect(Screen.width*.5f-220,Screen.height*.65f,440,35),UsesRoomKeys?"[E] 보스 문 열쇠 획득":"[E] 봉인 해제",label);
     }
